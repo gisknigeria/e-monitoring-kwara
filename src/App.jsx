@@ -6925,7 +6925,7 @@ function Dashboard({ session, onLogout, onSessionUpdate }) {
         >
           <div className="sidebar-brand">
             <div className="brand-small">
-              <img className="sidebar-logo" src="/WhatsApp Image 2026-07-26 at 6.43.40 AM.jpeg" alt="E Monitoring Kwara logo" />
+              <img className="sidebar-logo" src="/pdp-logo.png" alt="E Monitoring Kwara logo" />
               <div>
                 <b>E Monitoring</b>
                 <span>Command Center • Kwara</span>
@@ -7575,7 +7575,7 @@ function Dashboard({ session, onLogout, onSessionUpdate }) {
           </div>
         </div>
         {isAgent && <div className="agent-field-screen">
-          <img src="/WhatsApp Image 2026-07-26 at 6.43.40 AM.jpeg" alt="E Monitoring Kwara logo" />
+          <img src="/pdp-logo.png" alt="E Monitoring Kwara logo" />
           <span className="eyebrow">FIELD REPORTING</span>
           <h1>{session.user.pollingUnit || "Polling unit agent"}</h1>
           <p>{[session.user.lga, session.user.ward].filter(Boolean).join(" • ")}</p>
