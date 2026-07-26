@@ -93,8 +93,8 @@ const OYO_BOUNDS = [
   [8.38, 4.6],
 ];
 const severityColor = {
-  Low: "#38bdf8",
-  Medium: "#facc15",
+  Low: "#4ade80",
+  Medium: "#84cc16",
   High: "#fb923c",
   Critical: "#ef4444",
 };
@@ -135,8 +135,8 @@ const CategoryIcon = ({ cat, ...props }) => {
 };
 const CATEGORY_COLORS = {
   Point: "#fb923c",
-  Line: "#facc15",
-  Polygon: "#38bdf8",
+  Line: "#84cc16",
+  Polygon: "#4ade80",
   Raster: "#818cf8",
 };
 const LEGACY_CATEGORY_GEOMETRY = {
@@ -155,13 +155,13 @@ const layerGeometry = (layer) =>
       ? "Raster"
       : LEGACY_CATEGORY_GEOMETRY[layer?.category] || "Point";
 const LAYER_COLORS_PRESET = [
-  "#38bdf8",
-  "#facc15",
   "#4ade80",
+  "#84cc16",
+  "#22c55e",
   "#f87171",
   "#818cf8",
   "#fb923c",
-  "#60a5fa",
+  "#4ade80",
   "#e2e8f0",
 ];
 // POINT_ICONS: each entry is {key, label, Component} for the picker UI, and key is stored as pointIcon value
@@ -4476,7 +4476,7 @@ function AnalyticsPanel({
   const resolvedPct = totalIncidents ? Math.round((resolvedCount / totalIncidents) * 100) : 0;
 
   // Donut chart values for severity
-  const severityColors = { Low: "#38bdf8", Medium: "#facc15", High: "#fb923c", Critical: "#ef4444" };
+  const severityColors = { Low: "#4ade80", Medium: "#84cc16", High: "#fb923c", Critical: "#ef4444" };
   const donutR = 54;
   const donutCx = 70;
   const donutCy = 70;
