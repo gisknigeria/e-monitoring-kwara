@@ -1,5 +1,5 @@
 const CACHE_NAME = 'election-monitor-command-v5-logo';
-const APP_SHELL = ['/', '/manifest.webmanifest', '/bsa-logo.png', '/icons/icon-192.png', '/icons/icon-512.png', '/icons/maskable-192.png', '/icons/maskable-512.png', '/icons/apple-touch-icon.png', '/icons/favicon-32.png'];
+const APP_SHELL = ['/', '/manifest.webmanifest', '/e-monitoring-kwara-logo.svg', '/icons/icon-192.png', '/icons/icon-512.png', '/icons/maskable-192.png', '/icons/maskable-512.png', '/icons/apple-touch-icon.png', '/icons/favicon-32.png'];
 
 self.addEventListener('install', event => {
   event.waitUntil(caches.open(CACHE_NAME).then(cache => cache.addAll(APP_SHELL)).then(() => self.skipWaiting()));

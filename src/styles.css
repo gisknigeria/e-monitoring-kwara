@@ -83,21 +83,21 @@
 .agent-field-screen small{max-width:520px;color:#d8bcc8!important;line-height:1.6}
 .result-report-action{width:auto!important;padding:0 10px!important;color:#f8d984!important;font-size:10px!important;font-weight:900!important}
 
-/* Election Monitoring Command Center — wine and gold campaign theme */
+/* E Monitoring Kwara — PDP-inspired green campaign theme */
 :root{
-  --wine-950:#1b050d;
-  --wine-900:#260711;
-  --wine-850:#310a18;
-  --wine-800:#3c0c1e;
-  --wine-700:#59152d;
-  --wine-600:#741f3d;
-  --wine-500:#922b4d;
-  --gold-500:#d9aa4b;
-  --gold-400:#ecc86f;
-  --gold-300:#f5dc9a;
-  --cream:#fff8e8;
-  --muted-wine:#d5b8c2;
-  --wine-border:#6f2940;
+  --wine-950:#06130b;
+  --wine-900:#0d2315;
+  --wine-850:#12351d;
+  --wine-800:#174626;
+  --wine-700:#1f5b32;
+  --wine-600:#2f7a43;
+  --wine-500:#2f9d4f;
+  --gold-500:#84cc16;
+  --gold-400:#a3e635;
+  --gold-300:#dcfce7;
+  --cream:#f0fdf4;
+  --muted-wine:#c7f2cf;
+  --wine-border:#2f7a43;
   background:var(--wine-950);
   color:var(--cream)
 }
@@ -112,13 +112,13 @@ body{background:var(--wine-950)}
   padding:clamp(32px,7vw,110px);
   overflow:hidden;
   background:
-    radial-gradient(circle at 12% 18%,#9c315560 0,transparent 32%),
-    radial-gradient(circle at 92% 82%,#d9aa4b1f 0,transparent 27%),
-    linear-gradient(135deg,#220610 0%,#400d20 52%,#1b050d 100%)!important
+    radial-gradient(circle at 12% 18%,#22c55e55 0,transparent 32%),
+    radial-gradient(circle at 92% 82%,#84cc1680 0,transparent 27%),
+    linear-gradient(135deg,#052e16 0%,#14532d 52%,#052e16 100%)!important
 }
 .login-shell:before{
   content:"";position:absolute;inset:0;z-index:-1;opacity:.16;pointer-events:none;
-  background-image:linear-gradient(#f5dc9a18 1px,transparent 1px),linear-gradient(90deg,#f5dc9a18 1px,transparent 1px);
+  background-image:linear-gradient(#dcfce718 1px,transparent 1px),linear-gradient(90deg,#dcfce718 1px,transparent 1px);
   background-size:42px 42px;
   mask-image:linear-gradient(90deg,#000,transparent 72%)
 }
@@ -134,9 +134,9 @@ body{background:var(--wine-950)}
 .security-line svg{color:var(--gold-500)!important}
 .login-card{
   position:relative;overflow:hidden;max-width:460px;padding:42px!important;
-  background:linear-gradient(160deg,#52142bea,#2a0915f5)!important;
-  border:1px solid #be6b8570!important;border-radius:24px!important;
-  box-shadow:0 32px 80px #100208b3,inset 0 1px #fff2!important;
+  background:linear-gradient(160deg,#14532dff,#0a2b16f5)!important;
+  border:1px solid #4ade80a0!important;border-radius:24px!important;
+  box-shadow:0 32px 80px #02130a9e,inset 0 1px #fff2!important;
   backdrop-filter:blur(18px)
 }
 .login-card:before{content:"";position:absolute;inset:0 0 auto;height:4px;background:linear-gradient(90deg,var(--gold-500),var(--gold-300),var(--gold-500))}

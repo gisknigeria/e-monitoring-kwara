@@ -1,0 +1,25 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 640 320" role="img" aria-labelledby="title desc">
+  <title id="title">E Monitoring Kwara logo</title>
+  <desc id="desc">A green shield with a ballot box and the words E Monitoring Kwara.</desc>
+  <defs>
+    <linearGradient id="bg" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#0d2a17" />
+      <stop offset="100%" stop-color="#14532d" />
+    </linearGradient>
+    <linearGradient id="accent" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#dcfce7" />
+      <stop offset="100%" stop-color="#86efac" />
+    </linearGradient>
+  </defs>
+  <rect x="24" y="20" width="592" height="280" rx="40" fill="url(#bg)" />
+  <circle cx="172" cy="160" r="92" fill="#14532d" stroke="#dcfce7" stroke-width="10" />
+  <path d="M172 78l46 24v38c0 34-19 64-46 80-27-16-46-46-46-80v-38l46-24z" fill="#f8fafc" />
+  <path d="M154 118h36v36h-36z" fill="#16a34a" />
+  <path d="M165 122l12 12 20-24" fill="none" stroke="#052e16" stroke-width="8" stroke-linecap="round" stroke-linejoin="round" />
+  <rect x="260" y="94" width="270" height="124" rx="18" fill="#0b1f13" stroke="#86efac" stroke-width="8" />
+  <rect x="282" y="116" width="126" height="72" rx="12" fill="#1f2937" />
+  <path d="M306 154h74" stroke="#86efac" stroke-width="10" stroke-linecap="round" />
+  <path d="M306 136h54" stroke="#dcfce7" stroke-width="10" stroke-linecap="round" />
+  <path d="M300 190h140" stroke="#86efac" stroke-width="10" stroke-linecap="round" opacity="0.9" />
+  <text x="272" y="242" font-family="Arial, Helvetica, sans-serif" font-size="42" font-weight="800" fill="#f8fafc">E Monitoring Kwara</text>
+</svg>

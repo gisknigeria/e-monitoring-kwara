@@ -746,19 +746,19 @@ function Login({ onLogin }) {
   return (
     <main className="login-shell">
       <section className="login-brand">
-        <img className="campaign-logo" src="/bsa-logo.png" alt="BSA Oyo Ahead" />
+        <img className="campaign-logo" src="/e-monitoring-kwara-logo.svg" alt="E Monitoring Kwara" />
         <p className="command-kicker">Election intelligence platform</p>
-        <h1 className="command-title">Election Monitoring Command Center</h1>
+        <h1 className="command-title">E Monitoring Kwara</h1>
         <p className="command-copy">
-          Real-time monitoring, coordinated field operations and location-based election intelligence.
+          Real-time monitoring, coordinated field operations and location-based election intelligence for Kwara State.
         </p>
         <div className="security-line">
           <MdLocationPin style={{ verticalAlign: "-2px" }} />{" "}
-          Live field network • Oyo State
+          Live field network • Kwara State
         </div>
       </section>
       <form className="login-card" onSubmit={submit}>
-        <img className="login-card-logo" src="/bsa-logo.png" alt="BSA Oyo Ahead" />
+        <img className="login-card-logo" src="/e-monitoring-kwara-logo.svg" alt="E Monitoring Kwara" />
         <div className="eyebrow">SECURE COMMAND ACCESS</div>
         <h2>Welcome back</h2>
         <p className="muted">Sign in with your authorized election operations credentials.</p>
@@ -805,7 +805,7 @@ function Login({ onLogin }) {
         <button type="button" className="install-login" onClick={installApp}>
           Install command center app
         </button>
-        <p className="powered-by">Election Monitoring Command Center</p>
+        <p className="powered-by">E Monitoring Kwara</p>
       </form>
     </main>
   );
@@ -6925,10 +6925,10 @@ function Dashboard({ session, onLogout, onSessionUpdate }) {
         >
           <div className="sidebar-brand">
             <div className="brand-small">
-              <img className="sidebar-logo" src="/bsa-logo.png" alt="BSA Oyo Ahead" />
+              <img className="sidebar-logo" src="/e-monitoring-kwara-logo.svg" alt="E Monitoring Kwara" />
               <div>
-                <b>Election Monitor</b>
-                <span>Command Center • Oyo</span>
+                <b>E Monitoring</b>
+                <span>Command Center • Kwara</span>
               </div>
             </div>
             <button
@@ -7575,7 +7575,7 @@ function Dashboard({ session, onLogout, onSessionUpdate }) {
           </div>
         </div>
         {isAgent && <div className="agent-field-screen">
-          <img src="/bsa-logo.png" alt="BSA Oyo Ahead" />
+          <img src="/e-monitoring-kwara-logo.svg" alt="E Monitoring Kwara" />
           <span className="eyebrow">FIELD REPORTING</span>
           <h1>{session.user.pollingUnit || "Polling unit agent"}</h1>
           <p>{[session.user.lga, session.user.ward].filter(Boolean).join(" • ")}</p>

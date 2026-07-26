@@ -1,14 +1,14 @@
 {
-  "name": "Election Monitoring Command Center",
-  "short_name": "Election Monitor",
+  "name": "E Monitoring Kwara",
+  "short_name": "E Monitoring",
   "description": "Real-time monitoring, coordinated field operations and location-based election intelligence.",
   "id": "/",
   "start_url": "/",
   "scope": "/",
   "display": "standalone",
   "orientation": "any",
-  "background_color": "#240710",
-  "theme_color": "#6d1735",
+  "background_color": "#052e16",
+  "theme_color": "#14532d",
   "categories": ["government", "productivity", "utilities"],
   "icons": [
     {
