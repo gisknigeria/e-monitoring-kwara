@@ -746,7 +746,7 @@ function Login({ onLogin }) {
   return (
     <main className="login-shell">
       <section className="login-brand">
-        <img className="campaign-logo" src="/pdp-logo.png" alt="PDP logo" />
+        <img className="campaign-logo" src="/pdp-logo.png" alt="E Monitoring Kwara logo" />
         <p className="command-kicker">Election intelligence platform</p>
         <h1 className="command-title">E Monitoring Kwara</h1>
         <p className="command-copy">
@@ -758,7 +758,7 @@ function Login({ onLogin }) {
         </div>
       </section>
       <form className="login-card" onSubmit={submit}>
-        <img className="login-card-logo" src="/pdp-logo.png" alt="PDP logo" />
+        <img className="login-card-logo" src="/pdp-logo.png" alt="E Monitoring Kwara logo" />
         <div className="eyebrow">SECURE  ACCESS</div>
         <h2>Welcome back</h2>
         <p className="muted">Sign in with your authorized election operations credentials.</p>
