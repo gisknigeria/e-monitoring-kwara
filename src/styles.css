@@ -37,7 +37,6 @@
   .gps-share,.camera-open,.camera-share{padding:7px 8px;font-size:8px}
   .map-tools button{font-size:9px;padding:8px}
   .coord-jump{top:100px}
-  aside{max-height:60dvh}
 }
 
 /* Field Agent dashboard must remain visible after the desktop/mobile grid rules. */
