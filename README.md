@@ -22,3 +22,4 @@ Open `http://localhost:5173` and sign in with `admin@command.local` / `admin123`
 This is a demonstration build. Before operational deployment, replace JSON storage with PostgreSQL, configure strong secrets and refresh-token rotation, add audit logging/role guards, deploy behind HTTPS, and complete a security review.
 # Election Monitoring Command Center
 # e-monitoring-kwara
+# e-monitoring-kwara
