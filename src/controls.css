@@ -5,7 +5,7 @@
 .share-map-tool{border-color:#2f7a43!important;background:#10311d!important;color:#dcfce7!important}
 .danger-tool{border-color:#7f1d1d!important;background:#2a1016!important;color:#fecaca!important}
 .gps-share{border:1px solid #2f7a43;background:#10311d;color:#dcfce7;border-radius:6px;padding:8px 10px;font-size:9px;white-space:nowrap}
-.gps-share.sharing{border-color:#22c55e;background:#14532d;color:#dcfce7;box-shadow:0 0 14px #22c55e33}
+.gps-share.sharing{border-color:#fb923c;background:#431407;color:#fdba74;box-shadow:0 0 14px #fb923c33}
 .delete-incident{border:1px solid #7f1d1d;background:#2a1016;color:#fecaca;border-radius:7px;padding:11px;margin-top:9px;font-weight:600}
 .map-view-panel{position:absolute;z-index:1000;top:61px;left:18px;display:flex;align-items:center;gap:4px;padding:5px;background:#0d2315e8;border:1px solid #2f7a43;border-radius:6px;box-shadow:0 5px 20px #0006}.map-view-panel span{font:500 8px 'JetBrains Mono';color:#c7f2cf;padding:0 5px}.map-view-panel button{border:1px solid transparent;background:transparent;color:#c7f2cf;border-radius:4px;padding:6px 8px;font-size:9px}.map-view-panel button.active{border-color:#4ade80;background:#14532d;color:#dcfce7}@media(max-width:650px){.map-view-panel{top:56px;left:10px}.map-view-panel span{display:none}.map-view-panel button{padding:5px}}
 

@@ -746,7 +746,9 @@ function Login({ onLogin }) {
   return (
     <main className="login-shell">
       <section className="login-brand">
-        <img className="campaign-logo" src="/pdp-logo.png" alt="E Monitoring Kwara logo" />
+        <span className="logo-wrap logo-wrap--hero">
+          <img className="campaign-logo" src="/pdp-logo.png" alt="E Monitoring Kwara logo" />
+        </span>
         <p className="command-kicker">Election intelligence platform</p>
         <h1 className="command-title">E Monitoring Kwara</h1>
         <p className="command-copy">
@@ -758,7 +760,9 @@ function Login({ onLogin }) {
         </div>
       </section>
       <form className="login-card" onSubmit={submit}>
-        <img className="login-card-logo" src="/pdp-logo.png" alt="E Monitoring Kwara logo" />
+        <span className="logo-wrap logo-wrap--card">
+          <img className="login-card-logo" src="/pdp-logo.png" alt="E Monitoring Kwara logo" />
+        </span>
         <div className="eyebrow">SECURE  ACCESS</div>
         <h2>Welcome back</h2>
         <p className="muted">Sign in with your authorized election operations credentials.</p>
@@ -6925,7 +6929,9 @@ function Dashboard({ session, onLogout, onSessionUpdate }) {
         >
           <div className="sidebar-brand">
             <div className="brand-small">
-              <img className="sidebar-logo" src="/pdp-logo.png" alt="E Monitoring Kwara logo" />
+              <span className="logo-wrap logo-wrap--sidebar">
+                <img className="sidebar-logo" src="/pdp-logo.png" alt="E Monitoring Kwara logo" />
+              </span>
               <div>
                 <b>E Monitoring</b>
                 <span>Command Center • Kwara</span>
@@ -7575,7 +7581,9 @@ function Dashboard({ session, onLogout, onSessionUpdate }) {
           </div>
         </div>
         {isAgent && <div className="agent-field-screen">
-          <img src="/pdp-logo.png" alt="E Monitoring Kwara logo" />
+          <span className="logo-wrap logo-wrap--agent">
+            <img src="/pdp-logo.png" alt="E Monitoring Kwara logo" />
+          </span>
           <span className="eyebrow">FIELD REPORTING</span>
           <h1>{session.user.pollingUnit || "Polling unit agent"}</h1>
           <p>{[session.user.lga, session.user.ward].filter(Boolean).join(" • ")}</p>
