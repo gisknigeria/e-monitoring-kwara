@@ -746,7 +746,7 @@ function Login({ onLogin }) {
   return (
     <main className="login-shell">
       <section className="login-brand">
-        <img className="campaign-logo" src="/emk-logo.svg" alt="EMK logo" />
+        <img className="campaign-logo" src="/WhatsApp Image 2026-07-26 at 6.43.40 AM.jpeg" alt="PDP logo" />
         <p className="command-kicker">Election intelligence platform</p>
         <h1 className="command-title">E Monitoring Kwara</h1>
         <p className="command-copy">
@@ -758,7 +758,7 @@ function Login({ onLogin }) {
         </div>
       </section>
       <form className="login-card" onSubmit={submit}>
-        <img className="login-card-logo" src="/emk-logo.svg" alt="EMK logo" />
+        <img className="login-card-logo" src="/WhatsApp Image 2026-07-26 at 6.43.40 AM.jpeg" alt="PDP logo" />
         <div className="eyebrow">SECURE COMMAND ACCESS</div>
         <h2>Welcome back</h2>
         <p className="muted">Sign in with your authorized election operations credentials.</p>
