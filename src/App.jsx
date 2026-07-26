@@ -746,7 +746,7 @@ function Login({ onLogin }) {
   return (
     <main className="login-shell">
       <section className="login-brand">
-        <img className="campaign-logo" src="/e-monitoring-kwara-logo.svg" alt="E Monitoring Kwara" />
+        <img className="campaign-logo" src="/emk-logo.svg" alt="EMK logo" />
         <p className="command-kicker">Election intelligence platform</p>
         <h1 className="command-title">E Monitoring Kwara</h1>
         <p className="command-copy">
@@ -758,7 +758,7 @@ function Login({ onLogin }) {
         </div>
       </section>
       <form className="login-card" onSubmit={submit}>
-        <img className="login-card-logo" src="/e-monitoring-kwara-logo.svg" alt="E Monitoring Kwara" />
+        <img className="login-card-logo" src="/emk-logo.svg" alt="EMK logo" />
         <div className="eyebrow">SECURE COMMAND ACCESS</div>
         <h2>Welcome back</h2>
         <p className="muted">Sign in with your authorized election operations credentials.</p>
@@ -805,7 +805,7 @@ function Login({ onLogin }) {
         <button type="button" className="install-login" onClick={installApp}>
           Install command center app
         </button>
-        <p className="powered-by">E Monitoring Kwara</p>
+        <p className="powered-by">E-Monitoring Kwara</p>
       </form>
     </main>
   );
@@ -6925,7 +6925,7 @@ function Dashboard({ session, onLogout, onSessionUpdate }) {
         >
           <div className="sidebar-brand">
             <div className="brand-small">
-              <img className="sidebar-logo" src="/e-monitoring-kwara-logo.svg" alt="E Monitoring Kwara" />
+              <img className="sidebar-logo" src="/emk-logo.svg" alt="EMK logo" />
               <div>
                 <b>E Monitoring</b>
                 <span>Command Center • Kwara</span>
@@ -7575,7 +7575,7 @@ function Dashboard({ session, onLogout, onSessionUpdate }) {
           </div>
         </div>
         {isAgent && <div className="agent-field-screen">
-          <img src="/e-monitoring-kwara-logo.svg" alt="E Monitoring Kwara" />
+          <img src="/emk-logo.svg" alt="EMK logo" />
           <span className="eyebrow">FIELD REPORTING</span>
           <h1>{session.user.pollingUnit || "Polling unit agent"}</h1>
           <p>{[session.user.lga, session.user.ward].filter(Boolean).join(" • ")}</p>
