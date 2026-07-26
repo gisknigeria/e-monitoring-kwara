@@ -7,12 +7,12 @@
       <stop offset="100%" stop-color="#22c55e" />
     </linearGradient>
   </defs>
-  <rect x="20" y="20" width="280" height="280" rx="72" fill="url(#g)" />
-  <path d="M102 82h116c20 0 36 16 36 36v76c0 20-16 36-36 36H102c-20 0-36-16-36-36v-76c0-20 16-36 36-36z" fill="#f8fafc" opacity="0.96" />
-  <path d="M118 132h84" stroke="#14532d" stroke-width="10" stroke-linecap="round" />
-  <path d="M118 156h58" stroke="#14532d" stroke-width="10" stroke-linecap="round" />
-  <path d="M118 180h44" stroke="#14532d" stroke-width="10" stroke-linecap="round" />
-  <path d="M186 106l16 16 27-34" fill="none" stroke="#16a34a" stroke-width="12" stroke-linecap="round" stroke-linejoin="round" />
-  <path d="M88 210c24-38 44-58 74-72" stroke="#f0fdf4" stroke-width="12" stroke-linecap="round" />
-  <path d="M92 232c28-18 49-26 76-26" stroke="#dcfce7" stroke-width="12" stroke-linecap="round" />
+  <!-- background rect removed for transparent logo -->
+  <path d="M102 82h116c20 0 36 16 36 36v76c0 20-16 36-36 36H102c-20 0-36-16-36-36v-76c0-20 16-36 36-36z" fill="url(#g)" opacity="0.96" />
+  <path d="M118 132h84" stroke="#f8fafc" stroke-width="10" stroke-linecap="round" />
+  <path d="M118 156h58" stroke="#f8fafc" stroke-width="10" stroke-linecap="round" />
+  <path d="M118 180h44" stroke="#f8fafc" stroke-width="10" stroke-linecap="round" />
+  <path d="M186 106l16 16 27-34" fill="none" stroke="#dcfce7" stroke-width="12" stroke-linecap="round" stroke-linejoin="round" />
+  <path d="M88 210c24-38 44-58 74-72" stroke="#22c55e" stroke-width="12" stroke-linecap="round" />
+  <path d="M92 232c28-18 49-26 76-26" stroke="#4ade80" stroke-width="12" stroke-linecap="round" />
 </svg>
