@@ -4691,10 +4691,15 @@ function AnalyticsPanel({
 }
 
 function ResultsCenter({ incidents, onClose }) {
+  const [activeTab, setActiveTab] = useState("breakdown"); // "breakdown" | "winloss"
+  const [winLossView, setWinLossView] = useState("ward"); // "ward" | "lga" | "party"
+  const [focusParty, setFocusParty] = useState(null);
+
   const reports = useMemo(
     () => incidents.filter((item) => item.reportType === POLLING_RESULT_TYPE),
     [incidents],
   );
+
   const summary = useMemo(() => {
     const rows = reports.map((report) => {
       let results = [];
@@ -4708,6 +4713,78 @@ function ResultsCenter({ incidents, onClose }) {
       rows: rows.sort((a, b) => `${a.lga}${a.ward}${a.pollingUnit}`.localeCompare(`${b.lga}${b.ward}${b.pollingUnit}`)),
     };
   }, [reports]);
+
+  // Compute top-6 parties by total votes
+  const top6 = useMemo(() => {
+    return summary.partyNames
+      .slice()
+      .sort((a, b) => (summary.totals[b] || 0) - (summary.totals[a] || 0))
+      .slice(0, 6);
+  }, [summary]);
+
+  // Aggregate votes by ward and by LGA for top-6 parties
+  const winLossSummary = useMemo(() => {
+    if (!top6.length || !summary.rows.length) return { byWard: [], byLga: [] };
+
+    // Helper: sum votes per party in a group of rows
+    const sumVotes = (rows) => {
+      const votes = {};
+      for (const party of top6) votes[party] = 0;
+      for (const row of rows) {
+        for (const party of top6) {
+          votes[party] += Number(row.results.find(r => r.party === party)?.votes || 0);
+        }
+      }
+      return votes;
+    };
+
+    // Group by ward (LGA + Ward key)
+    const wardMap = {};
+    for (const row of summary.rows) {
+      const key = `${row.lga || "Unknown LGA"}|||${row.ward || "Unknown Ward"}`;
+      if (!wardMap[key]) wardMap[key] = { lga: row.lga || "Unknown LGA", ward: row.ward || "Unknown Ward", rows: [] };
+      wardMap[key].rows.push(row);
+    }
+    const byWard = Object.values(wardMap).map(({ lga, ward, rows }) => {
+      const votes = sumVotes(rows);
+      const maxVotes = Math.max(...Object.values(votes));
+      const winner = maxVotes > 0 ? top6.find(p => votes[p] === maxVotes) : null;
+      return { lga, ward, votes, winner, units: rows.length };
+    }).sort((a, b) => `${a.lga}${a.ward}`.localeCompare(`${b.lga}${b.ward}`));
+
+    // Group by LGA
+    const lgaMap = {};
+    for (const row of summary.rows) {
+      const key = row.lga || "Unknown LGA";
+      if (!lgaMap[key]) lgaMap[key] = { lga: key, rows: [] };
+      lgaMap[key].rows.push(row);
+    }
+    const byLga = Object.values(lgaMap).map(({ lga, rows }) => {
+      const votes = sumVotes(rows);
+      const maxVotes = Math.max(...Object.values(votes));
+      const winner = maxVotes > 0 ? top6.find(p => votes[p] === maxVotes) : null;
+      return { lga, votes, winner, wards: [...new Set(rows.map(r => r.ward))].length, units: rows.length };
+    }).sort((a, b) => a.lga.localeCompare(b.lga));
+
+    return { byWard, byLga };
+  }, [summary, top6]);
+
+  // Per-party breakdown: where they win and lose
+  const partyBreakdown = useMemo(() => {
+    if (!focusParty) return null;
+    const winningWards = winLossSummary.byWard.filter(r => r.winner === focusParty);
+    const losingWards = winLossSummary.byWard.filter(r => r.winner && r.winner !== focusParty);
+    const winningLgas = winLossSummary.byLga.filter(r => r.winner === focusParty);
+    const losingLgas = winLossSummary.byLga.filter(r => r.winner && r.winner !== focusParty);
+    return { winningWards, losingWards, winningLgas, losingLgas };
+  }, [focusParty, winLossSummary]);
+
+  const PARTY_COLORS = ["#f5dc9a", "#6ee7b7", "#93c5fd", "#fca5a5", "#c4b5fd", "#fdba74"];
+  const partyColor = (party) => {
+    const idx = top6.indexOf(party);
+    return idx >= 0 ? PARTY_COLORS[idx] : "#aaa";
+  };
+
   return (
     <div className="results-center">
       <header className="results-center-head">
@@ -4718,24 +4795,267 @@ function ResultsCenter({ incidents, onClose }) {
         </div>
         <button className="icon-btn" onClick={onClose} title="Close results"><FaTimes /></button>
       </header>
+
+      {/* Tab bar */}
+      <div className="rc-tab-bar">
+        <button className={activeTab === "breakdown" ? "rc-tab active" : "rc-tab"} onClick={() => setActiveTab("breakdown")}>Polling Unit Breakdown</button>
+        <button className={activeTab === "winloss" ? "rc-tab active" : "rc-tab"} onClick={() => setActiveTab("winloss")}>
+          Win / Loss Map {top6.length > 0 && <span className="rc-tab-badge">{top6.length} parties</span>}
+        </button>
+      </div>
+
       <main className="results-center-body">
-        <section className="result-total-strip">
-          <article className="result-total-card grand"><span>Polling-unit submissions</span><strong>{reports.length}</strong><small>Multiple updates per unit are allowed</small></article>{summary.partyNames.map(party => <article className="result-total-card" key={party}><span>{party}</span><strong>{summary.totals[party].toLocaleString()}</strong><small>Total uploaded votes</small></article>)}
-        </section>
-        <section className="result-table-card">
-          <div className="result-table-title"><div><h2>Polling-unit breakdown</h2><p>Counts and evidence submitted from the field.</p></div><b>{reports.length} submitted</b></div>
-          <div className="result-table-scroll">
-            <table className="result-progress-table">
-              <thead><tr><th>LGA</th><th>Ward</th><th>Polling unit</th>{summary.partyNames.map(party => <th key={party}>{party}</th>)}<th>Location</th><th>Evidence</th><th>Uploaded</th></tr></thead>
-              <tbody>
-                {summary.rows.map((row) => (
-                  <tr key={row.id}><td>{row.lga || "—"}</td><td>{row.ward || "—"}</td><td><b>{row.pollingUnit || "—"}</b></td>{summary.partyNames.map(party => <td key={party}><strong>{Number(row.results.find(item => item.party === party)?.votes || 0).toLocaleString()}</strong></td>)}<td>{Number(row.lat).toFixed(5)}, {Number(row.lng).toFixed(5)}</td><td><div className="result-evidence">{(row.media || []).filter((item) => item.type === "image").slice(0, 2).map((item, index) => <a href={item.data} target="_blank" rel="noreferrer" key={`${row.id}-${index}`}><img src={item.data} alt={`Evidence for ${row.pollingUnit}`} /></a>)}</div></td><td>{new Date(row.createdAt).toLocaleString()}</td></tr>
-                ))}
-                {!summary.rows.length && <tr><td className="result-empty" colSpan={summary.partyNames.length + 7}>No polling-unit results have been uploaded yet.</td></tr>}
-              </tbody>
-            </table>
+        {activeTab === "breakdown" && (
+          <>
+            <section className="result-total-strip">
+              <article className="result-total-card grand"><span>Polling-unit submissions</span><strong>{reports.length}</strong><small>Multiple updates per unit are allowed</small></article>
+              {summary.partyNames.map(party => <article className="result-total-card" key={party}><span>{party}</span><strong>{summary.totals[party].toLocaleString()}</strong><small>Total uploaded votes</small></article>)}
+            </section>
+            <section className="result-table-card">
+              <div className="result-table-title"><div><h2>Polling-unit breakdown</h2><p>Counts and evidence submitted from the field.</p></div><b>{reports.length} submitted</b></div>
+              <div className="result-table-scroll">
+                <table className="result-progress-table">
+                  <thead><tr><th>LGA</th><th>Ward</th><th>Polling unit</th>{summary.partyNames.map(party => <th key={party}>{party}</th>)}<th>Location</th><th>Evidence</th><th>Uploaded</th></tr></thead>
+                  <tbody>
+                    {summary.rows.map((row) => (
+                      <tr key={row.id}><td>{row.lga || "—"}</td><td>{row.ward || "—"}</td><td><b>{row.pollingUnit || "—"}</b></td>{summary.partyNames.map(party => <td key={party}><strong>{Number(row.results.find(item => item.party === party)?.votes || 0).toLocaleString()}</strong></td>)}<td>{Number(row.lat).toFixed(5)}, {Number(row.lng).toFixed(5)}</td><td><div className="result-evidence">{(row.media || []).filter((item) => item.type === "image").slice(0, 2).map((item, index) => <a href={item.data} target="_blank" rel="noreferrer" key={`${row.id}-${index}`}><img src={item.data} alt={`Evidence for ${row.pollingUnit}`} /></a>)}</div></td><td>{new Date(row.createdAt).toLocaleString()}</td></tr>
+                    ))}
+                    {!summary.rows.length && <tr><td className="result-empty" colSpan={summary.partyNames.length + 7}>No polling-unit results have been uploaded yet.</td></tr>}
+                  </tbody>
+                </table>
+              </div>
+            </section>
+          </>
+        )}
+
+        {activeTab === "winloss" && (
+          <div className="wl-panel">
+            {!top6.length ? (
+              <div className="wl-empty">No results uploaded yet. Win/Loss analysis will appear once polling units submit their counts.</div>
+            ) : (
+              <>
+                {/* Top-6 party chips */}
+                <div className="wl-party-strip">
+                  <span className="wl-strip-label">Top 6 parties by total votes:</span>
+                  {top6.map((party, i) => (
+                    <button
+                      key={party}
+                      className={`wl-party-chip${focusParty === party ? " active" : ""}`}
+                      style={{ "--chip-color": PARTY_COLORS[i] }}
+                      onClick={() => { setFocusParty(party === focusParty ? null : party); setWinLossView("party"); }}
+                      title={`${summary.totals[party]?.toLocaleString()} total votes`}
+                    >
+                      <span className="wl-chip-dot" />
+                      {party}
+                      <span className="wl-chip-votes">{summary.totals[party]?.toLocaleString()}</span>
+                    </button>
+                  ))}
+                  {focusParty && <button className="wl-clear-btn" onClick={() => { setFocusParty(null); setWinLossView("ward"); }}>✕ Clear</button>}
+                </div>
+
+                {/* Sub-view tabs */}
+                <div className="wl-sub-tabs">
+                  <button className={winLossView === "ward" ? "wl-sub-tab active" : "wl-sub-tab"} onClick={() => { setWinLossView("ward"); setFocusParty(null); }}>By Ward</button>
+                  <button className={winLossView === "lga" ? "wl-sub-tab active" : "wl-sub-tab"} onClick={() => { setWinLossView("lga"); setFocusParty(null); }}>By LGA</button>
+                  {focusParty && <button className={winLossView === "party" ? "wl-sub-tab active" : "wl-sub-tab"} onClick={() => setWinLossView("party")}>{focusParty} Detail</button>}
+                </div>
+
+                {/* BY WARD VIEW */}
+                {winLossView === "ward" && (
+                  <section className="result-table-card wl-table-card">
+                    <div className="result-table-title">
+                      <div><h2>Ward-level win / loss</h2><p>The leading party at each ward based on submitted polling unit votes.</p></div>
+                      <b>{winLossSummary.byWard.length} wards</b>
+                    </div>
+                    <div className="result-table-scroll">
+                      <table className="result-progress-table">
+                        <thead>
+                          <tr>
+                            <th>LGA</th><th>Ward</th><th>Units</th><th>Winner</th>
+                            {top6.map(p => <th key={p} style={{ color: partyColor(p) }}>{p}</th>)}
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {winLossSummary.byWard.map(({ lga, ward, votes, winner, units }) => (
+                            <tr key={`${lga}${ward}`}>
+                              <td>{lga}</td>
+                              <td>{ward}</td>
+                              <td>{units}</td>
+                              <td>
+                                {winner
+                                  ? <span className="wl-winner-badge" style={{ background: partyColor(winner) + "22", color: partyColor(winner), border: `1px solid ${partyColor(winner)}66` }}>{winner}</span>
+                                  : <span className="wl-tie">—</span>}
+                              </td>
+                              {top6.map(p => (
+                                <td key={p} className={winner === p ? "wl-win-cell" : winner ? "wl-loss-cell" : ""}>
+                                  <span className="wl-votes">{votes[p]?.toLocaleString() || 0}</span>
+                                  {winner === p && <span className="wl-icon">✓</span>}
+                                  {winner && winner !== p && <span className="wl-icon wl-loss-icon">✗</span>}
+                                </td>
+                              ))}
+                            </tr>
+                          ))}
+                          {!winLossSummary.byWard.length && (
+                            <tr><td className="result-empty" colSpan={top6.length + 4}>No ward-level data available yet.</td></tr>
+                          )}
+                        </tbody>
+                      </table>
+                    </div>
+                  </section>
+                )}
+
+                {/* BY LGA VIEW */}
+                {winLossView === "lga" && (
+                  <section className="result-table-card wl-table-card">
+                    <div className="result-table-title">
+                      <div><h2>LGA-level win / loss</h2><p>The leading party in each Local Government Area.</p></div>
+                      <b>{winLossSummary.byLga.length} LGAs</b>
+                    </div>
+                    <div className="result-table-scroll">
+                      <table className="result-progress-table">
+                        <thead>
+                          <tr>
+                            <th>LGA</th><th>Wards</th><th>Units</th><th>Winner</th>
+                            {top6.map(p => <th key={p} style={{ color: partyColor(p) }}>{p}</th>)}
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {winLossSummary.byLga.map(({ lga, votes, winner, wards, units }) => (
+                            <tr key={lga}>
+                              <td><b>{lga}</b></td>
+                              <td>{wards}</td>
+                              <td>{units}</td>
+                              <td>
+                                {winner
+                                  ? <span className="wl-winner-badge" style={{ background: partyColor(winner) + "22", color: partyColor(winner), border: `1px solid ${partyColor(winner)}66` }}>{winner}</span>
+                                  : <span className="wl-tie">—</span>}
+                              </td>
+                              {top6.map(p => (
+                                <td key={p} className={winner === p ? "wl-win-cell" : winner ? "wl-loss-cell" : ""}>
+                                  <span className="wl-votes">{votes[p]?.toLocaleString() || 0}</span>
+                                  {winner === p && <span className="wl-icon">✓</span>}
+                                  {winner && winner !== p && <span className="wl-icon wl-loss-icon">✗</span>}
+                                </td>
+                              ))}
+                            </tr>
+                          ))}
+                          {!winLossSummary.byLga.length && (
+                            <tr><td className="result-empty" colSpan={top6.length + 4}>No LGA-level data available yet.</td></tr>
+                          )}
+                        </tbody>
+                      </table>
+                    </div>
+                  </section>
+                )}
+
+                {/* PER-PARTY DETAIL VIEW */}
+                {winLossView === "party" && focusParty && partyBreakdown && (
+                  <div className="wl-party-detail">
+                    <div className="wl-party-detail-header" style={{ borderColor: partyColor(focusParty) }}>
+                      <h2 style={{ color: partyColor(focusParty) }}>{focusParty}</h2>
+                      <div className="wl-party-detail-stats">
+                        <span className="wl-stat-win">✓ Winning {partyBreakdown.winningWards.length} ward{partyBreakdown.winningWards.length !== 1 ? "s" : ""}</span>
+                        <span className="wl-stat-loss">✗ Losing {partyBreakdown.losingWards.length} ward{partyBreakdown.losingWards.length !== 1 ? "s" : ""}</span>
+                        <span className="wl-stat-win">✓ Winning {partyBreakdown.winningLgas.length} LGA{partyBreakdown.winningLgas.length !== 1 ? "s" : ""}</span>
+                        <span className="wl-stat-loss">✗ Losing {partyBreakdown.losingLgas.length} LGA{partyBreakdown.losingLgas.length !== 1 ? "s" : ""}</span>
+                      </div>
+                    </div>
+
+                    <div className="wl-detail-cols">
+                      {/* LGA summary */}
+                      <div className="wl-detail-col">
+                        <div className="wl-detail-col-head wl-win-head">✓ LGAs Won ({partyBreakdown.winningLgas.length})</div>
+                        {partyBreakdown.winningLgas.length ? (
+                          <table className="result-progress-table wl-mini-table">
+                            <thead><tr><th>LGA</th><th>Votes</th><th>Lead</th></tr></thead>
+                            <tbody>
+                              {partyBreakdown.winningLgas.map(({ lga, votes }) => {
+                                const secondBest = Math.max(...top6.filter(p => p !== focusParty).map(p => votes[p] || 0));
+                                const lead = (votes[focusParty] || 0) - secondBest;
+                                return (
+                                  <tr key={lga} className="wl-win-row">
+                                    <td><b>{lga}</b></td>
+                                    <td>{(votes[focusParty] || 0).toLocaleString()}</td>
+                                    <td className="wl-lead">+{lead.toLocaleString()}</td>
+                                  </tr>
+                                );
+                              })}
+                            </tbody>
+                          </table>
+                        ) : <div className="wl-none">No LGAs won yet.</div>}
+
+                        <div className="wl-detail-col-head wl-loss-head" style={{ marginTop: 18 }}>✗ LGAs Lost ({partyBreakdown.losingLgas.length})</div>
+                        {partyBreakdown.losingLgas.length ? (
+                          <table className="result-progress-table wl-mini-table">
+                            <thead><tr><th>LGA</th><th>Votes</th><th>Leader</th><th>Gap</th></tr></thead>
+                            <tbody>
+                              {partyBreakdown.losingLgas.map(({ lga, votes, winner }) => {
+                                const gap = (votes[winner] || 0) - (votes[focusParty] || 0);
+                                return (
+                                  <tr key={lga} className="wl-loss-row">
+                                    <td><b>{lga}</b></td>
+                                    <td>{(votes[focusParty] || 0).toLocaleString()}</td>
+                                    <td><span className="wl-winner-badge" style={{ background: partyColor(winner) + "22", color: partyColor(winner), border: `1px solid ${partyColor(winner)}44` }}>{winner}</span></td>
+                                    <td className="wl-gap">-{gap.toLocaleString()}</td>
+                                  </tr>
+                                );
+                              })}
+                            </tbody>
+                          </table>
+                        ) : <div className="wl-none">Not losing any LGAs.</div>}
+                      </div>
+
+                      {/* Ward summary */}
+                      <div className="wl-detail-col">
+                        <div className="wl-detail-col-head wl-win-head">✓ Wards Won ({partyBreakdown.winningWards.length})</div>
+                        {partyBreakdown.winningWards.length ? (
+                          <table className="result-progress-table wl-mini-table">
+                            <thead><tr><th>LGA</th><th>Ward</th><th>Votes</th><th>Lead</th></tr></thead>
+                            <tbody>
+                              {partyBreakdown.winningWards.map(({ lga, ward, votes }) => {
+                                const secondBest = Math.max(...top6.filter(p => p !== focusParty).map(p => votes[p] || 0));
+                                const lead = (votes[focusParty] || 0) - secondBest;
+                                return (
+                                  <tr key={`${lga}${ward}`} className="wl-win-row">
+                                    <td>{lga}</td>
+                                    <td><b>{ward}</b></td>
+                                    <td>{(votes[focusParty] || 0).toLocaleString()}</td>
+                                    <td className="wl-lead">+{lead.toLocaleString()}</td>
+                                  </tr>
+                                );
+                              })}
+                            </tbody>
+                          </table>
+                        ) : <div className="wl-none">No wards won yet.</div>}
+
+                        <div className="wl-detail-col-head wl-loss-head" style={{ marginTop: 18 }}>✗ Wards Lost ({partyBreakdown.losingWards.length})</div>
+                        {partyBreakdown.losingWards.length ? (
+                          <table className="result-progress-table wl-mini-table">
+                            <thead><tr><th>LGA</th><th>Ward</th><th>Votes</th><th>Leader</th><th>Gap</th></tr></thead>
+                            <tbody>
+                              {partyBreakdown.losingWards.map(({ lga, ward, votes, winner }) => {
+                                const gap = (votes[winner] || 0) - (votes[focusParty] || 0);
+                                return (
+                                  <tr key={`${lga}${ward}`} className="wl-loss-row">
+                                    <td>{lga}</td>
+                                    <td><b>{ward}</b></td>
+                                    <td>{(votes[focusParty] || 0).toLocaleString()}</td>
+                                    <td><span className="wl-winner-badge" style={{ background: partyColor(winner) + "22", color: partyColor(winner), border: `1px solid ${partyColor(winner)}44` }}>{winner}</span></td>
+                                    <td className="wl-gap">-{gap.toLocaleString()}</td>
+                                  </tr>
+                                );
+                              })}
+                            </tbody>
+                          </table>
+                        ) : <div className="wl-none">Not losing any wards.</div>}
+                      </div>
+                    </div>
+                  </div>
+                )}
+              </>
+            )}
           </div>
-        </section>
+        )}
       </main>
     </div>
   );
