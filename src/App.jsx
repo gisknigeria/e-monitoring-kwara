@@ -8513,13 +8513,9 @@ export default function App() {
   });
   const login = (value, rememberMe = true) => {
     const sessionValue = JSON.stringify(value);
-    if (rememberMe) {
-      localStorage.setItem("command-session", sessionValue);
-      sessionStorage.removeItem("command-session");
-    } else {
-      sessionStorage.setItem("command-session", sessionValue);
-      localStorage.removeItem("command-session");
-    }
+    // Keep authorized sessions across reloads. Logout explicitly clears it.
+    localStorage.setItem("command-session", sessionValue);
+    sessionStorage.removeItem("command-session");
     setSession(value);
   };
   const logout = () => {
