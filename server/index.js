@@ -543,6 +543,25 @@ const emitEmergencyAlert = (sourceSocket, alert) => {
 };
 
 app.get('/api/health', (_, res) => res.json({ ok: true, service: 'Election Monitoring Command API', database: pool ? 'neon-postgres' : 'json-file' }));
+app.get('/api/news', auth, asyncRoute(async (req, res) => {
+  const q = String(req.query.q || 'Ilorin Kwara election').slice(0, 160);
+  const feeds = [
+    `https://news.google.com/rss/search?q=${encodeURIComponent(q)}&hl=en-NG&gl=NG&ceid=NG:en`,
+    `https://news.google.com/rss/search?q=${encodeURIComponent('Kwara Ilorin INEC election')}&hl=en-NG&gl=NG&ceid=NG:en`,
+    'https://punchng.com/feed/', 'https://www.premiumtimesng.com/feed', 'https://guardian.ng/feed/'
+  ];
+  const xmls = await Promise.all(feeds.map(feed => fetch(feed, { headers: { 'User-Agent': 'Election-Monitor/1.0' } }).then(r => r.ok ? r.text() : '').catch(() => '')));
+  const seen = new Set();
+  const articles = xmls.flatMap(xml => [...xml.matchAll(/<item>([\s\S]*?)<\/item>/g)].map(m => { const read = tag => (m[1].match(new RegExp(`<${tag}[^>]*>([\\s\\S]*?)<\\/${tag}>`))?.[1] || '').replace(/<!\[CDATA\[|\]\]>/g, '').trim(); return { title: read('title'), url: read('link') || read('guid'), source: 'News feed', publishedAt: read('pubDate') }; })).filter(item => item.title && item.url && !seen.has(item.url) && seen.add(item.url)).sort((a,b) => new Date(b.publishedAt || 0) - new Date(a.publishedAt || 0));
+  console.log(`[news] kwara query=${JSON.stringify(q)} articles=${articles.length}`);
+  res.json({ articles, query: q, provider: 'google-rss' });
+}));
+const aiPrimaryModel = process.env.OPENAI_MODEL || 'gpt-5.6-terra';
+const aiFallbackModel = process.env.OPENAI_FALLBACK_MODEL || 'gpt-5.6-luna';
+const callOpenAI = async (prompt, model) => { const r = await fetch('https://api.openai.com/v1/responses', { method: 'POST', headers: { Authorization: `Bearer ${process.env.OPENAI_API_KEY}`, 'Content-Type': 'application/json' }, body: JSON.stringify({ model, input: prompt, max_output_tokens: 700 }) }); const b = await r.json().catch(() => ({})); if (!r.ok) { const e = new Error(b?.error?.message || 'AI request failed'); e.status = r.status; throw e; } return b.output_text || ''; };
+const callOpenAIWithFallback = async prompt => { try { return { text: await callOpenAI(prompt, aiPrimaryModel), model: aiPrimaryModel }; } catch (e) { if (![400, 404, 429].includes(e.status)) throw e; return { text: await callOpenAI(prompt, aiFallbackModel), model: aiFallbackModel }; } };
+app.post('/api/news/summary', auth, adminOnly, asyncRoute(async (req, res) => { if (!process.env.OPENAI_API_KEY) return res.status(503).json({ message: 'AI is not configured.' }); const articles = (Array.isArray(req.body?.articles) ? req.body.articles : []).slice(0, 30).map(item => `${item.title} (${item.source})`).join('\n'); if (!articles) return res.status(400).json({ message: 'News articles are required.' }); const result = await callOpenAIWithFallback(`Summarize these Ilorin/Kwara election headlines neutrally. Identify hot themes, confirmed facts versus uncertainty, and operational implications. Do not persuade voters or recommend partisan messaging.\n${articles}`); res.json({ summary: result.text, model: result.model }); }));
+app.post('/api/analysis/ai', auth, adminOnly, asyncRoute(async (req, res) => { if (!process.env.OPENAI_API_KEY) return res.status(503).json({ message: 'AI is not configured.' }); const context = JSON.stringify(req.body?.context || {}).slice(0, 12000); const result = await callOpenAIWithFallback(`Provide a neutral operational election-monitoring analysis for Kwara/Ilorin using this data. Discuss uncertainty, data quality, incident/SOS priorities, and verification actions. Do not target voters or recommend partisan persuasion.\n${context}`); res.json({ analysis: result.text, model: result.model }); }));
 app.get('/api/admin/ip-log', auth, adminOnly, (req, res) => {
   const { userId, type, limit = 200 } = req.query;
   let results = ipLog;

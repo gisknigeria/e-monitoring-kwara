@@ -4690,7 +4690,12 @@ function AnalyticsPanel({
   );
 }
 
-function ResultsCenter({ incidents, onClose }) {
+function ResultsCenter({ incidents, onClose, token }) {
+  const [news, setNews] = useState([]);
+  const [newsOpen, setNewsOpen] = useState(false);
+  const [newsLoading, setNewsLoading] = useState(false);
+  const [aiSummary, setAiSummary] = useState("");
+  const loadNews = () => { setNewsLoading(true); request('/news?q=Ilorin%20Kwara%20election', token).then(data => setNews(data.articles || [])).catch(() => setNews([])).finally(() => setNewsLoading(false)); };
   const [activeTab, setActiveTab] = useState("breakdown"); // "breakdown" | "winloss"
   const [winLossView, setWinLossView] = useState("ward"); // "ward" | "lga" | "party"
   const [focusParty, setFocusParty] = useState(null);
@@ -4793,8 +4798,9 @@ function ResultsCenter({ incidents, onClose }) {
           <h1>Election result progress</h1>
           <p>Live totals for every political party uploaded by Admin.</p>
         </div>
-        <button className="icon-btn" onClick={onClose} title="Close results"><FaTimes /></button>
+        <div><button className="secondary" onClick={() => { setNewsOpen(true); loadNews(); }}>Ilorin News</button> <button className="primary" onClick={() => request('/analysis/ai', token, { method: 'POST', body: JSON.stringify({ context: { incidents: incidents.slice(0, 100), resultCount: incidents.filter(i => i.reportType === 'Polling Unit Result').length } }) }).then(x => setAiSummary(x.analysis)).catch(() => setAiSummary('AI operational analysis unavailable. Check the OpenAI key and Render logs.'))}>AI Operations</button> <button className="icon-btn" onClick={onClose} title="Close results"><FaTimes /></button></div>
       </header>
+      {newsOpen && <section className="result-table-card" style={{ margin: 18 }}><div className="result-table-title"><div><h2>Latest Ilorin / Kwara election news</h2><p>Live headlines fetched from public RSS feeds.</p></div><div><button className="secondary" onClick={loadNews}>Refresh</button> <button className="primary" disabled={!news.length} onClick={() => request('/news/summary', token, { method: 'POST', body: JSON.stringify({ articles: news }) }).then(x => setAiSummary(x.summary)).catch(() => setAiSummary('AI summary unavailable. Check the OpenAI key and Render logs.'))}>AI Summary</button></div></div>{aiSummary && <p className="news-summary">{aiSummary}</p>}{newsLoading ? <p>Loading news…</p> : <div className="news-list">{news.map(item => <article className="news-item" key={item.url}><a href={item.url} target="_blank" rel="noreferrer"><h3>{item.title}</h3></a><small>{item.source} · {item.publishedAt || 'Recent'}</small></article>)}{!news.length && <p>No headlines returned. Check the server logs for the provider count.</p>}</div>}</section>}
 
       {/* Tab bar */}
       <div className="rc-tab-bar">
@@ -8277,7 +8283,7 @@ function Dashboard({ session, onLogout, onSessionUpdate }) {
           )}
         </section>
       )}
-      {resultsOpen && canAdmin && <ResultsCenter incidents={incidents} onClose={() => setResultsOpen(false)} />}
+      {resultsOpen && canAdmin && <ResultsCenter incidents={incidents} token={session.token} onClose={() => setResultsOpen(false)} />}
       {analyticsOpen && canAdmin && (
         <AnalyticsPanel
           incidents={incidents}

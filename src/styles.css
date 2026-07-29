@@ -1325,3 +1325,4 @@ body.resizing-sidebar{cursor:col-resize;user-select:none}
 @media(max-width:600px) {
   .role-change-fields { grid-template-columns: 1fr; }
 }
+.news-list{display:grid;gap:10px}.news-item{padding:14px;border:1px solid #5d2035;border-radius:10px;background:#210916}.news-item h3{margin:0 0 6px;font-size:15px}.news-item a{color:#f5dc9a;text-decoration:none}.news-item small{color:#c9aab6}
