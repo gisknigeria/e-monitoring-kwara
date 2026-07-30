@@ -7403,7 +7403,7 @@ function Dashboard({ session, onLogout, onSessionUpdate }) {
                     return next;
                   })}
                 >
-                  <h3>Situational Rep</h3>
+                  <h3>Users</h3>
                   <span>{situationalOpen ? "−" : "+"}</span>
                 </button>
                 {situationalOpen && (
