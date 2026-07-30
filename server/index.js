@@ -5,24 +5,39 @@ import bcrypt from 'bcryptjs';
 import { createServer } from 'node:http';
 import { Server } from 'socket.io';
 import { existsSync, readFileSync, writeFileSync } from 'node:fs';
+import { randomBytes } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 import pg from 'pg';
 import { canManageRank, normalizeCommand, ranksBelow } from '../shared/electionData.js';
+import { credentialFingerprint, createId, createRateLimitState, normalizeText, sanitizeString, validateContentLength, validateCoordinates, validateEmail, validateExternalUrl, validateMediaPayload, validatePassword } from './security.js';
+import { analyzeContextLocally, summarizeNewsLocally } from './ai.js';
 
 const { Pool } = pg;
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const dataFile = process.env.DATA_FILE || join(__dirname, 'data.json');
-const secret = process.env.JWT_SECRET || 'demo-only-change-me';
+const secret = process.env.JWT_SECRET || randomBytes(32).toString('hex');
+if (!process.env.JWT_SECRET) {
+  console.warn('JWT_SECRET is not set. Using a generated ephemeral secret for this process.');
+}
 const databaseUrl = process.env.DATABASE_URL;
 const superAdminEmail = process.env.SUPER_ADMIN_EMAIL || 'superadmin@command.local';
-const superAdminPassword = process.env.SUPER_ADMIN_PASSWORD || 'Password1234';
+const superAdminPassword = process.env.SUPER_ADMIN_PASSWORD || randomBytes(24).toString('hex');
 const adminEmail = process.env.ADMIN_EMAIL || 'admin@command.local';
-const adminPassword = process.env.ADMIN_PASSWORD || 'Password1234';
+const adminPassword = process.env.ADMIN_PASSWORD || randomBytes(24).toString('hex');
+if (!process.env.SUPER_ADMIN_PASSWORD || !process.env.ADMIN_PASSWORD) {
+  console.warn('SUPER_ADMIN_PASSWORD and ADMIN_PASSWORD were not set. Generated secure random passwords for the seeded admin accounts.');
+}
+if (process.env.NODE_ENV === 'production') {
+  const missing = ['JWT_SECRET', 'SUPER_ADMIN_PASSWORD', 'ADMIN_PASSWORD'].filter(name => !process.env[name]);
+  if (missing.length) throw new Error(`Missing required production configuration: ${missing.join(', ')}`);
+  if (Buffer.byteLength(process.env.JWT_SECRET, 'utf8') < 32) throw new Error('JWT_SECRET must contain at least 32 bytes');
+  if (!validatePassword(process.env.SUPER_ADMIN_PASSWORD) || !validatePassword(process.env.ADMIN_PASSWORD)) throw new Error('Seed administrator passwords do not meet the password policy');
+}
 const seed = {
   users: [
-    { id: 'u0', name: 'System Administrator', email: superAdminEmail, password: bcrypt.hashSync(superAdminPassword, 10), role: 'Super Admin', rank: 'Super Admin', active: true, unit: 'System Control', command: 'Oyo State Command', division: '', state: 'Oyo', lga: '', lat: 7.3775, lng: 3.9470 },
-    { id: 'u1', name: 'Election Operations Admin', email: adminEmail, password: bcrypt.hashSync(adminPassword, 10), role: 'Admin', rank: 'Admin', active: true, unit: 'Command Center', command: 'Oyo State Command', division: '', state: 'Oyo', lga: '', lat: 7.3775, lng: 3.9470 }
+    { id: 'u0', name: 'System Administrator', email: superAdminEmail, password: bcrypt.hashSync(superAdminPassword, 10), role: 'Super Admin', rank: 'Super Admin', active: true, unit: 'System Control', command: 'Kwara State Command', division: '', state: 'Kwara', lga: '', lat: 8.4799, lng: 4.5418 },
+    { id: 'u1', name: 'Election Operations Admin', email: adminEmail, password: bcrypt.hashSync(adminPassword, 10), role: 'Admin', rank: 'Admin', active: true, unit: 'Command Center', command: 'Kwara State Command', division: '', state: 'Kwara', lga: '', lat: 8.4799, lng: 4.5418 }
   ],
   incidents: [],
   cameras: [],
@@ -42,21 +57,32 @@ jsonDb.chatRooms ||= [];
 jsonDb.chatMembers ||= [];
 jsonDb.chatMessages ||= [];
 jsonDb.parties ||= [];
+const existingSeedUsers = new Map(jsonDb.users.filter(user => ['u0', 'u1'].includes(user.id)).map(user => [user.id, user]));
 jsonDb.users = jsonDb.users.filter(user => !['u0', 'u1', 'u2', 'u3'].includes(user.id));
-jsonDb.users.unshift(...seed.users);
+jsonDb.users.unshift(...seed.users.map(user => {
+  const existing = existingSeedUsers.get(user.id);
+  return existing ? { ...user, ...existing, password: existing.password } : user;
+}));
 jsonDb.users = jsonDb.users.map(user => {
   if (user.role === 'Officer') return { ...user, role: 'Agent', rank: 'Agent' };
-  if (user.role === 'Admin') return { ...user, rank: 'Admin', command: user.command || 'Oyo State Command' };
+  if (user.role === 'Admin') return { ...user, rank: 'Admin', command: user.command || 'Kwara State Command' };
   return user;
 });
 jsonDb.incidents = jsonDb.incidents.filter(incident => !['i1', 'i2', 'i3'].includes(incident.id) && incident.createdBy !== 'seed');
 const saveJson = () => writeFileSync(dataFile, JSON.stringify(jsonDb, null, 2));
 if (!databaseUrl) saveJson();
 
-const pool = databaseUrl ? new Pool({ connectionString: databaseUrl }) : null;
+const pool = databaseUrl ? new Pool({
+  connectionString: databaseUrl,
+  ssl: process.env.DATABASE_SSL === 'disable' ? false : { rejectUnauthorized: true },
+  max: Math.max(1, Math.min(Number(process.env.DATABASE_POOL_SIZE) || 10, 20)),
+  connectionTimeoutMillis: 10_000,
+  idleTimeoutMillis: 30_000,
+  statement_timeout: 15_000,
+}) : null;
 const publicUser = ({ password, ...user }) => user;
 const asyncRoute = fn => (req, res, next) => Promise.resolve(fn(req, res, next)).catch(next);
-const toUser = row => row && ({ id: row.id, name: row.name, email: row.email, password: row.password, role: row.role, rank: row.rank || '', active: row.active, unit: row.unit, unitType: row.unit_type || 'Division', command: row.command || '', division: row.division || '', station: row.station || '', state: row.state || '', lga: row.lga || '', ward: row.ward || '', pollingUnit: row.polling_unit || '', lat: Number(row.lat) || 7.3775, lng: Number(row.lng) || 3.9470 });
+const toUser = row => row && ({ id: row.id, name: row.name, email: row.email, password: row.password, role: row.role, rank: row.rank || '', active: row.active, unit: row.unit, unitType: row.unit_type || 'Division', command: row.command || '', division: row.division || '', station: row.station || '', state: row.state || '', lga: row.lga || '', ward: row.ward || '', pollingUnit: row.polling_unit || '', lat: Number(row.lat) || 8.4799, lng: Number(row.lng) || 4.5418 });
 const toIncident = row => row && ({ id: row.id, title: row.title, description: row.description, reportType: row.report_type || 'IP', severity: row.severity, status: row.status, lat: Number(row.lat), lng: Number(row.lng), assignedTo: row.assigned_to || '', visibleTo: row.visible_to || [], media: row.media || [], geometry: row.geometry || null, style: row.style || null, lga: row.lga || '', ward: row.ward || '', pollingUnit: row.polling_unit || '', resultCount: row.result_count || '', createdAt: row.created_at?.toISOString?.() || row.created_at, updatedAt: row.updated_at?.toISOString?.() || row.updated_at, createdBy: row.created_by || '' });
 const toCamera = row => row && ({ id: row.id, name: row.name, type: row.type, url: row.url, lat: Number(row.lat), lng: Number(row.lng), status: row.status, createdAt: row.created_at?.toISOString?.() || row.created_at });
 const toMapLayer = row => row && ({ id: row.id, name: row.name, type: row.type, data: row.data, url: row.url || '', bounds: row.bounds, opacity: Number(row.opacity ?? 0.65), fillOpacity: Number(row.fill_opacity ?? 0.18), category: row.category || (row.type === 'raster' ? 'Raster' : 'Point'), operationalUse: row.operational_use || 'Reference', color: row.color || '#facc15', fillColor: row.fill_color || '#f59e0b', lineWeight: Number(row.line_weight || 2), lineStyle: row.line_style || 'solid', pointIcon: row.point_icon || 'pin', pointIconColor: row.point_icon_color || '#ffffff', pointSize: Number(row.point_size || 24), showLabels: row.show_labels ?? true, labelField: row.label_field || 'name', popupFields: row.popup_fields || '', visible: row.visible ?? true, zIndex: Number(row.z_index || 0), createdAt: row.created_at?.toISOString?.() || row.created_at, updatedAt: row.updated_at?.toISOString?.() || row.updated_at });
@@ -83,8 +109,8 @@ async function initPostgres() {
       lga text default '',
       ward text default '',
       polling_unit text default '',
-      lat double precision default 7.3775,
-      lng double precision default 3.9470
+      lat double precision default 8.4799,
+      lng double precision default 4.5418
     );
     create table if not exists incidents (
       id text primary key,
@@ -113,8 +139,8 @@ async function initPostgres() {
       name text not null,
       type text default 'CCTV',
       url text not null,
-      lat double precision default 7.3775,
-      lng double precision default 3.9470,
+      lat double precision default 8.4799,
+      lng double precision default 4.5418,
       status text default 'Online',
       created_at timestamptz default now()
     );
@@ -206,7 +232,7 @@ async function initPostgres() {
   await pool.query("delete from incidents where id in ('i1','i2','i3') or created_by='seed'");
   await pool.query("delete from users where id in ('u2','u3')");
   for (const user of seed.users) {
-    await pool.query('insert into users (id,name,email,password,role,rank,active,unit,unit_type,command,division,station,lga,lat,lng) values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15) on conflict (id) do update set name=excluded.name,email=excluded.email,password=excluded.password,role=excluded.role,rank=excluded.rank,active=excluded.active,unit=excluded.unit,command=excluded.command', [user.id, user.name, user.email, user.password, user.role, user.rank, user.active, user.unit, user.unitType || 'Division', user.command, user.division, user.station || '', user.lga, user.lat, user.lng]);
+    await pool.query('insert into users (id,name,email,password,role,rank,active,unit,unit_type,command,division,station,lga,lat,lng) values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15) on conflict (id) do update set name=excluded.name,email=excluded.email,role=excluded.role,rank=excluded.rank,active=excluded.active,unit=excluded.unit,command=excluded.command', [user.id, user.name, user.email, user.password, user.role, user.rank, user.active, user.unit, user.unitType || 'Division', user.command, user.division, user.station || '', user.lga, user.lat, user.lng]);
   }
 }
 
@@ -441,15 +467,92 @@ await initPostgres();
 
 const app = express();
 const server = createServer(app);
-const io = new Server(server, { cors: { origin: '*' } });
+const allowedOrigins = (process.env.CORS_ORIGIN || process.env.RENDER_EXTERNAL_URL || 'http://127.0.0.1:5173').split(',').map(value => value.trim()).filter(Boolean);
+const isAllowedOrigin = (origin, callback) => callback(null, !origin || allowedOrigins.includes(origin));
+const io = new Server(server, {
+  cors: { origin: isAllowedOrigin, credentials: true },
+  maxHttpBufferSize: 1_000_000,
+  perMessageDeflate: false,
+});
 const activeCameraShares = new Map();
+const loginLimiter = createRateLimitState();
+const generalLimiter = createRateLimitState();
+const socketLimiter = createRateLimitState();
+const openAiPrimaryModel = process.env.OPENAI_MODEL || 'gpt-5.6-terra';
+const openAiFallbackModel = process.env.OPENAI_FALLBACK_MODEL || 'gpt-5.6-luna';
+const groqPrimaryModel = process.env.GROQ_MODEL || 'llama-3.1-8b-instant';
+const groqFallbackModel = process.env.GROQ_FALLBACK_MODEL || 'openai/gpt-oss-20b';
+const groqNewsModel = process.env.GROQ_NEWS_MODEL || 'groq/compound-mini';
+const callGroq = async (prompt, model) => {
+  const response = await fetch('https://api.groq.com/openai/v1/chat/completions', {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${process.env.GROQ_API_KEY}`,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({
+      model,
+      messages: [{ role: 'user', content: prompt }],
+      temperature: 0.2,
+      max_completion_tokens: 700,
+    }),
+  });
+  const body = await response.json().catch(() => ({}));
+  if (!response.ok) {
+    const error = new Error(body?.error?.message || 'Groq request failed');
+    error.status = response.status;
+    throw error;
+  }
+  return body.choices?.[0]?.message?.content || '';
+};
+const callGroqWithFallback = async (prompt) => {
+  try {
+    return { text: await callGroq(prompt, groqPrimaryModel), model: groqPrimaryModel };
+  } catch (primaryError) {
+    console.error('[groq] primary failed:', primaryError.status || '', primaryError.message);
+    return { text: await callGroq(prompt, groqFallbackModel), model: groqFallbackModel };
+  }
+};
+const normalizeNewsTitle = (value, articleUrl = '') => {
+  const normalized = sanitizeString(String(value || '')
+    .replace(/([a-z])([A-Z])/g, '$1 $2')
+    .replace(/([A-Z]{2,})([a-z])/g, '$1 $2')
+    .replace(/([A-Za-z])([0-9])/g, '$1 $2')
+    .replace(/([0-9])([A-Za-z])/g, '$1 $2')
+    .replace(/:\s*/g, ': ')
+    .replace(/\s*[-–—]\s*/g, ' — '));
+  if ((normalized.match(/\s/g) || []).length < 2 && articleUrl) {
+    try {
+      const parts = new URL(articleUrl).pathname.split('/').filter(Boolean);
+      const slug = decodeURIComponent(parts.at(-1) || '')
+        .replace(/\.(?:html?|ece|php|aspx?)$/i, '')
+        .replace(/[-_]+/g, ' ')
+        .replace(/\b\d{7,}\b.*$/g, '')
+        .replace(/\s+/g, ' ')
+        .trim();
+      if ((slug.match(/\s/g) || []).length >= 2 && /[A-Za-z]/.test(slug)) {
+        return sanitizeString(slug.charAt(0).toUpperCase() + slug.slice(1));
+      }
+    } catch {
+      // Keep the provider title when its URL is opaque or malformed.
+    }
+  }
+  return normalized;
+};
+const normalizeNewsDate = value => { const raw = String(value || '').trim(); const compact = raw.match(/^(\d{4})(\d{2})(\d{2})T?(\d{2})?(\d{2})?(\d{2})?Z?$/); const date = compact ? new Date(Date.UTC(Number(compact[1]), Number(compact[2]) - 1, Number(compact[3]), Number(compact[4] || 0), Number(compact[5] || 0), Number(compact[6] || 0))) : new Date(raw); return Number.isNaN(date.getTime()) ? '' : date.toISOString(); };
+const isKwaraStateNews = value => {
+  const text = String(value || '');
+  if (/\bkwara state\b|\bilorin\b|\boffa\b|\bjebba\b/i.test(text)) return true;
+  const hasBareKwara = /\bkwara\b/i.test(text);
+  const hasLocalContext = /\bnigeria(?:n)?\b|\binec\b|\babdulrazaq\b|\bgovern(?:or|ment|ance)\b|\bstate assembly\b|\bcommissioner\b|\bpolice\b|\bsecurity\b|\bcp\b|\blga\b|\blocal government\b|\bmonarchs?\b|\bresidents?\b|\bpolitic(?:s|al)?\b|\belections?\b|\bapc\b|\bpdp\b|\blabour party\b/i.test(text);
+  return hasBareKwara && hasLocalContext;
+};
 
 // In-memory IP log — stores last 500 entries (incident + SOS submissions)
 const ipLog = [];
 const MAX_IP_LOG = 500;
 const getClientIp = req =>
-  (req.headers['x-forwarded-for'] || '').split(',')[0].trim() ||
-  req.headers['x-real-ip'] ||
+  req.ip ||
   req.socket?.remoteAddress ||
   'unknown';
 const logIp = (type, user, incidentId, ip) => {
@@ -457,9 +560,77 @@ const logIp = (type, user, incidentId, ip) => {
   if (ipLog.length > MAX_IP_LOG) ipLog.length = MAX_IP_LOG;
 };
 
-app.use(cors());
-app.use(express.json({ limit: '20mb' }));
-const auth = (req, res, next) => { try { req.user = jwt.verify((req.headers.authorization || '').replace('Bearer ', ''), secret); next(); } catch { res.status(401).json({ message: 'Session expired. Please sign in again.' }); } };
+app.disable('x-powered-by');
+app.set('trust proxy', process.env.TRUST_PROXY === 'true' ? 1 : false);
+app.use(cors({ origin: isAllowedOrigin, credentials: true, allowedHeaders: ['Content-Type', 'Authorization'], methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'], maxAge: 600 }));
+// Keep the parser limit aligned with the attachment policy.  This prevents
+// oversized JSON from consuming memory before endpoint-level validation runs.
+app.use(express.json({ limit: '12mb' }));
+app.use(express.urlencoded({ extended: false, limit: '1mb' }));
+app.use((req, res, next) => {
+  const bodySize = Number(req.headers['content-length'] || 0);
+  if (bodySize > 12 * 1024 * 1024) return res.status(413).json({ message: 'Request body is too large.' });
+  if (!validateContentLength(bodySize)) return res.status(413).json({ message: 'Request body is too large.' });
+  res.setHeader('X-Content-Type-Options', 'nosniff');
+  res.setHeader('X-Frame-Options', 'DENY');
+  res.setHeader('Referrer-Policy', 'no-referrer');
+  // These capabilities are core application features; scope them to this
+  // origin rather than disabling them or allowing cross-origin use.
+  res.setHeader('Permissions-Policy', 'geolocation=(self), camera=(self), microphone=(self)');
+  if (req.secure || process.env.NODE_ENV === 'production') res.setHeader('Strict-Transport-Security', 'max-age=31536000; includeSubDomains');
+  res.setHeader('Content-Security-Policy', "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: https:; connect-src 'self' https://nominatim.openstreetmap.org https://router.project-osrm.org ws: wss:; font-src 'self' data:; media-src 'self' data: https:; object-src 'none'; base-uri 'none'; form-action 'self'; frame-ancestors 'none'; upgrade-insecure-requests");
+  res.setHeader('Cross-Origin-Opener-Policy', 'same-origin');
+  res.setHeader('Cross-Origin-Resource-Policy', 'same-origin');
+  res.setHeader('Cache-Control', req.path.startsWith('/api') ? 'no-store' : 'no-cache');
+  next();
+});
+const tokenOptions = { algorithms: ['HS256'], issuer: 'election-monitor-api', audience: 'election-monitor-web' };
+const sessionTtl = process.env.SESSION_TTL || '30d';
+const sessionCookieMaxAge = Math.max(3600, Number(process.env.SESSION_COOKIE_MAX_AGE) || 30 * 24 * 60 * 60);
+const issueToken = user => jwt.sign(
+  { sub: user.id, fp: credentialFingerprint(user.password) },
+  secret,
+  { algorithm: 'HS256', issuer: tokenOptions.issuer, audience: tokenOptions.audience, expiresIn: sessionTtl, jwtid: createId('jwt') },
+);
+const sessionCookie = token => `__Host-session=${encodeURIComponent(token)}; Path=/; Max-Age=${sessionCookieMaxAge}; HttpOnly; SameSite=Strict${process.env.NODE_ENV === 'production' ? '; Secure' : ''}`;
+const clearSessionCookie = '__Host-session=; Path=/; Max-Age=0; HttpOnly; SameSite=Strict';
+const cookieValue = (req, name) => String(req.headers.cookie || '').split(';').map(v => v.trim()).find(v => v.startsWith(`${name}=`))?.slice(name.length + 1);
+const authenticateToken = async token => {
+  const claims = jwt.verify(token, secret, tokenOptions);
+  const user = (await store.users()).find(candidate => candidate.id === claims.sub);
+  if (!user || !user.active || claims.fp !== credentialFingerprint(user.password)) throw new Error('Invalid session');
+  return publicUser(user);
+};
+const auth = asyncRoute(async (req, res, next) => {
+  const header = req.headers.authorization || '';
+  const token = header.startsWith('Bearer ') ? header.slice(7) : cookieValue(req, '__Host-session');
+  if (!token) return res.status(401).json({ message: 'Authentication required.' });
+  try {
+    req.user = await authenticateToken(token);
+    next();
+  } catch {
+    res.status(401).json({ message: 'Session expired. Please sign in again.' });
+  }
+});
+const rateLimit = (req, res, next) => {
+  const key = req.ip || 'global';
+  const result = generalLimiter.hit(key, 120, 60_000);
+  res.setHeader('RateLimit-Remaining', String(result.remaining));
+  if (!result.allowed) {
+    res.setHeader('Retry-After', String(Math.max(1, Math.ceil((result.resetAt - Date.now()) / 1000))));
+    return res.status(429).json({ message: 'Too many requests. Please try again shortly.' });
+  }
+  next();
+};
+const loginRateLimit = (req, res, next) => {
+  const key = `${req.ip || 'global'}:${String(req.body?.email || '').trim().toLowerCase()}`;
+  const result = loginLimiter.hit(key, 5, 15 * 60_000);
+  if (!result.allowed) {
+    res.setHeader('Retry-After', String(Math.max(1, Math.ceil((result.resetAt - Date.now()) / 1000))));
+    return res.status(429).json({ message: 'Too many login attempts. Please try again later.' });
+  }
+  next();
+};
 const isAdminRole = user => ['Admin', 'Super Admin'].includes(user?.role);
 const adminOnly = (req, res, next) => isAdminRole(req.user) ? next() : res.status(403).json({ message: 'Admin access required' });
 const superAdminOnly = (req, res, next) => req.user.role === 'Super Admin' ? next() : res.status(403).json({ message: 'System administrator access required' });
@@ -542,54 +713,325 @@ const emitEmergencyAlert = (sourceSocket, alert) => {
   }
 };
 
-app.get('/api/health', (_, res) => res.json({ ok: true, service: 'Election Monitoring Command API', database: pool ? 'neon-postgres' : 'json-file' }));
-app.get('/api/news', auth, asyncRoute(async (req, res) => {
-  const q = String(req.query.q || 'Ilorin Kwara election').slice(0, 160);
-  const feeds = [
-    `https://news.google.com/rss/search?q=${encodeURIComponent(q)}&hl=en-NG&gl=NG&ceid=NG:en`,
-    `https://news.google.com/rss/search?q=${encodeURIComponent('Kwara Ilorin INEC election')}&hl=en-NG&gl=NG&ceid=NG:en`,
-    'https://punchng.com/feed/', 'https://www.premiumtimesng.com/feed', 'https://guardian.ng/feed/'
-  ];
-  const xmls = await Promise.all(feeds.map(feed => fetch(feed, { headers: { 'User-Agent': 'Election-Monitor/1.0' } }).then(r => r.ok ? r.text() : '').catch(() => '')));
-  const seen = new Set();
-  const articles = xmls.flatMap(xml => [...xml.matchAll(/<item>([\s\S]*?)<\/item>/g)].map(m => { const read = tag => (m[1].match(new RegExp(`<${tag}[^>]*>([\\s\\S]*?)<\\/${tag}>`))?.[1] || '').replace(/<!\[CDATA\[|\]\]>/g, '').trim(); return { title: read('title'), url: read('link') || read('guid'), source: 'News feed', publishedAt: read('pubDate') }; })).filter(item => item.title && item.url && !seen.has(item.url) && seen.add(item.url)).sort((a,b) => new Date(b.publishedAt || 0) - new Date(a.publishedAt || 0));
-  console.log(`[news] kwara query=${JSON.stringify(q)} articles=${articles.length}`);
-  res.json({ articles, query: q, provider: 'google-rss' });
+app.get('/api/health', rateLimit, (_, res) => res.json({ ok: true, service: 'Election Monitoring Command API' }));
+let kwaraBoundaryCache = null;
+app.get('/api/boundaries/kwara', rateLimit, asyncRoute(async (_req, res) => {
+  if (kwaraBoundaryCache?.expiresAt > Date.now()) return res.json(kwaraBoundaryCache.data);
+  const base = 'https://services3.arcgis.com/7J7WB6yJX0pYke9q/ArcGIS/rest/services/NCO_Security_Database_WFL1/FeatureServer';
+  const queryLayer = async (layer, where) => {
+    const params = new URLSearchParams({
+      where,
+      outFields: '*',
+      returnGeometry: 'true',
+      outSR: '4326',
+      f: 'geojson'
+    });
+    const response = await fetch(`${base}/${layer}/query?${params}`, {
+      headers: { 'User-Agent': 'Election-Monitor/1.0 boundary service' },
+      signal: AbortSignal.timeout(12_000)
+    });
+    if (!response.ok) throw new Error(`Boundary provider returned ${response.status}`);
+    const geojson = await response.json();
+    if (!Array.isArray(geojson.features)) throw new Error('Boundary provider returned invalid GeoJSON');
+    return geojson;
+  };
+  try {
+    const [states, lgas] = await Promise.all([
+      queryLayer('2', "ADM1_EN = 'Kwara'"),
+      queryLayer('1', "ADM1_EN = 'Kwara'")
+    ]);
+    const data = {
+      state: states,
+      lgas,
+      attribution: 'Administrative boundaries: ArcGIS feature service',
+      fetchedAt: new Date().toISOString()
+    };
+    kwaraBoundaryCache = { data, expiresAt: Date.now() + 24 * 60 * 60 * 1000 };
+    res.set('Cache-Control', 'public, max-age=3600, stale-while-revalidate=86400');
+    return res.json(data);
+  } catch (error) {
+    console.error('[boundaries] Kwara boundary fetch failed:', error.message);
+    return res.status(503).json({ message: 'Kwara boundary data is temporarily unavailable.' });
+  }
 }));
-const aiPrimaryModel = process.env.OPENAI_MODEL || 'gpt-5.6-terra';
-const aiFallbackModel = process.env.OPENAI_FALLBACK_MODEL || 'gpt-5.6-luna';
-const callOpenAI = async (prompt, model) => { const r = await fetch('https://api.openai.com/v1/responses', { method: 'POST', headers: { Authorization: `Bearer ${process.env.OPENAI_API_KEY}`, 'Content-Type': 'application/json' }, body: JSON.stringify({ model, input: prompt, max_output_tokens: 700 }) }); const b = await r.json().catch(() => ({})); if (!r.ok) { const e = new Error(b?.error?.message || 'AI request failed'); e.status = r.status; throw e; } return b.output_text || ''; };
-const callOpenAIWithFallback = async prompt => { if (process.env.GEMINI_API_KEY) { const call = async model => { const r = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${encodeURIComponent(process.env.GEMINI_API_KEY)}`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ contents: [{ parts: [{ text: prompt }] }] }) }); const b = await r.json(); if (!r.ok) throw new Error('Gemini failed'); return b.candidates?.[0]?.content?.parts?.map(p => p.text || '').join('') || ''; }; const model = process.env.GEMINI_MODEL || 'gemini-3.1-flash-lite'; try { return { text: await call(model), model }; } catch { const fallback = process.env.GEMINI_FALLBACK_MODEL || 'gemini-3-flash'; return { text: await call(fallback), model: fallback }; } } try { return { text: await callOpenAI(prompt, aiPrimaryModel), model: aiPrimaryModel }; } catch (e) { if (![400, 404, 429].includes(e.status)) throw e; return { text: await callOpenAI(prompt, aiFallbackModel), model: aiFallbackModel }; } };
-app.post('/api/news/summary', auth, adminOnly, asyncRoute(async (req, res) => { if (!process.env.OPENAI_API_KEY) return res.status(503).json({ message: 'AI is not configured.' }); const articles = (Array.isArray(req.body?.articles) ? req.body.articles : []).slice(0, 30).map(item => `${item.title} (${item.source})`).join('\n'); if (!articles) return res.status(400).json({ message: 'News articles are required.' }); const result = await callOpenAIWithFallback(`Summarize these Ilorin/Kwara election headlines neutrally. Identify hot themes, confirmed facts versus uncertainty, and operational implications. Do not persuade voters or recommend partisan messaging.\n${articles}`); res.json({ summary: result.text, model: result.model }); }));
-app.post('/api/analysis/ai', auth, adminOnly, asyncRoute(async (req, res) => { if (!process.env.OPENAI_API_KEY) return res.status(503).json({ message: 'AI is not configured.' }); const context = JSON.stringify(req.body?.context || {}).slice(0, 12000); const result = await callOpenAIWithFallback(`Provide a neutral operational election-monitoring analysis for Kwara/Ilorin using this data. Discuss uncertainty, data quality, incident/SOS priorities, and verification actions. Do not target voters or recommend partisan persuasion.\n${context}`); res.json({ analysis: result.text, model: result.model }); }));
-app.get('/api/admin/ip-log', auth, adminOnly, (req, res) => {
+app.use(['/api/news/summary', '/api/analysis/ai'], (req, _res, next) => { console.log(`[ai] request=${req.path} geminiConfigured=${Boolean(process.env.GEMINI_API_KEY)} model=${process.env.GEMINI_MODEL || 'gemini-2.0-flash'}`); next(); });
+app.get('/api/ai/status', auth, adminOnly, rateLimit, (_, res) => {
+  const provider = process.env.GROQ_API_KEY ? 'groq' : process.env.GEMINI_API_KEY ? 'gemini' : process.env.OPENAI_API_KEY ? 'openai' : 'none';
+  const models = provider === 'groq'
+    ? [groqPrimaryModel, groqFallbackModel]
+    : provider === 'gemini'
+      ? [process.env.GEMINI_MODEL || 'gemini-2.0-flash', process.env.GEMINI_FALLBACK_MODEL || 'gemini-2.0-flash-lite']
+      : [process.env.OPENAI_MODEL || null, process.env.OPENAI_FALLBACK_MODEL || null];
+  res.json({ configured: provider !== 'none', provider, model: models[0], fallbackModel: models[1] });
+});
+app.get('/api/news', auth, rateLimit, asyncRoute(async (req, res) => {
+  const q = String(req.query.q || 'Kwara State election').slice(0, 180);
+  const configuredParties = (await store.parties())
+    .slice(0, 20)
+    .map(party => sanitizeString(party).replace(/["()]/g, ' ').trim())
+    .filter(Boolean);
+  const partyQueryTerms = configuredParties.map(party => `"Kwara ${party}"`);
+  const providerArticles = [];
+  if (process.env.GNEWS_API_KEY) {
+    const gnewsPartyTerms = partyQueryTerms.slice(0, 5);
+    const gnewsQuery = /kwara|ilorin/i.test(q)
+      ? `("Kwara State" OR Ilorin OR Offa OR Jebba OR "Governor AbdulRazaq" OR "INEC Kwara"${gnewsPartyTerms.length ? ` OR ${gnewsPartyTerms.join(' OR ')}` : ''})`
+      : q;
+    const gnews = await fetch(`https://gnews.io/api/v4/search?q=${encodeURIComponent(gnewsQuery)}&lang=en&max=50&sortby=publishedAt&apikey=${encodeURIComponent(process.env.GNEWS_API_KEY)}`, { headers: { 'User-Agent': 'Election-Monitor/1.0' } }).catch(() => null);
+    if (gnews?.ok) {
+      const payload = await gnews.json();
+      const articles = (payload.articles || []).map(item => ({ title: normalizeNewsTitle(item.title, item.url), description: sanitizeString(item.description || ''), url: validateExternalUrl(item.url, ['https:']) ? item.url : '', source: sanitizeString(item.source?.name || ''), publishedAt: normalizeNewsDate(item.publishedAt), language: 'en' })).filter(item => item.title && item.url && isKwaraStateNews(`${item.title} ${item.description}`)).sort((a, b) => new Date(b.publishedAt || 0) - new Date(a.publishedAt || 0));
+      console.log(`[news] provider=gnews query=${JSON.stringify(q)} total=${payload.totalArticles || 0} articles=${articles.length}`);
+      providerArticles.push(...articles);
+    }
+  }
+  // Keep the query broad: requiring every keyword at once produces empty
+  // results because most articles mention only one location or party.
+  const query = `("${q}" OR "Kwara State" OR Ilorin OR Offa OR Jebba OR "Governor AbdulRazaq" OR "Kwara government" OR "INEC Kwara" OR "Kwara election"${partyQueryTerms.length ? ` OR ${partyQueryTerms.slice(0, 10).join(' OR ')}` : ''})`;
+  const url = `https://api.gdeltproject.org/api/v2/doc/doc?query=${encodeURIComponent(query)}&mode=artlist&format=json&maxrecords=50&sort=HybridRel`;
+  let data;
+  try {
+    const response = await fetch(url, { headers: { 'User-Agent': 'Election-Monitor/1.0 news aggregation' } });
+    if (response.ok) data = await response.json();
+  } catch { /* fall through to RSS */ }
+  const queries = [
+    q,
+    '"Kwara State"',
+    '"Kwara State" news',
+    '"Kwara State" government',
+    '"Kwara State" security',
+    'Ilorin news',
+    'Offa news',
+    'Jebba Kwara news',
+    '"Governor AbdulRazaq"',
+    '"INEC Kwara"',
+    '"Kwara State" election',
+    '"Kwara State" political parties',
+    '"Kwara APC"',
+    '"Kwara PDP"',
+    '"Kwara Labour Party"',
+    '"Kwara NNPP"',
+    '"Kwara SDP"',
+    '"Kwara State House of Assembly"',
+    '"Kwara State" local government',
+    '"Kwara State" upcoming election',
+    ...configuredParties.map(party => `"Kwara State" political party "${party}"`)
+  ];
+  const feeds = queries.map(term => `https://news.google.com/rss/search?q=${encodeURIComponent(term)}&hl=en-NG&gl=NG&ceid=NG:en`).concat(['https://punchng.com/feed/', 'https://www.premiumtimesng.com/feed', 'https://guardian.ng/feed/']);
+  const xmls = await Promise.all(feeds.map((feed, index) => fetch(feed, { headers: { 'User-Agent': 'Election-Monitor/1.0' } }).then(async r => ({ xml: r.ok ? await r.text() : '', searchContext: index < queries.length ? queries[index] : '' })).catch(() => ({ xml: '', searchContext: '' }))));
+  const parseRss = ({ xml, searchContext }) => [...xml.matchAll(/<item>([\s\S]*?)<\/item>/g)].map(m => { const block = m[1]; const read = tag => (block.match(new RegExp(`<${tag}[^>]*>([\\s\\S]*?)<\\/${tag}>`))?.[1] || '').replace(/<!\[CDATA\[|\]\]>/g, '').trim(); return { title: read('title'), url: read('link') || read('guid'), domain: 'News feed', pubdate: read('pubDate'), searchContext }; });
+  data = { articles: [...providerArticles, ...(Array.isArray(data?.articles) ? data.articles : []), ...xmls.flatMap(parseRss)] };
+  const seen = new Set();
+  const articles = (Array.isArray(data.articles) ? data.articles : [])
+    .map(item => ({
+      title: normalizeNewsTitle(item.title, item.url),
+      description: sanitizeString(item.description || ''),
+      url: validateExternalUrl(item.url, ['https:']) ? item.url : '',
+      source: sanitizeString(item.source || item.domain || ''),
+      publishedAt: normalizeNewsDate(item.publishedAt || item.seendate || item.pubdate),
+      language: item.language || '',
+      searchContext: item.searchContext || ''
+    }))
+    .filter(item => item.title && item.url && isKwaraStateNews(`${item.title} ${item.description} ${item.searchContext}`) && !seen.has(item.url) && seen.add(item.url))
+    .sort((a, b) => (Date.parse(b.publishedAt) || 0) - (Date.parse(a.publishedAt) || 0))
+    .slice(0, 200)
+    .map(({ searchContext: _searchContext, ...item }) => item);
+  console.log(`[news] provider=${data === undefined ? 'none' : 'gdelt/rss'} query=${JSON.stringify(q)} articles=${articles.length}`);
+  res.json({ articles, query: q, provider: 'gdelt/rss', fetchedAt: new Date().toISOString() });
+}));
+app.post('/api/news/summary', auth, adminOnly, rateLimit, asyncRoute(async (req, res) => {
+  const articles = Array.isArray(req.body?.articles) ? req.body.articles.slice(0, 30) : [];
+  if (!articles.length) return res.status(400).json({ message: 'News articles are required.' });
+  const newsPrompt = `Create a concise Kwara State news briefing using the supplied headlines and, when your model supports web search, current reputable web sources. Cover genuine Kwara State developments, prioritizing politics, INEC, elections, parties, governance, security, public services, and major local events. Return at most 160 words with exactly these plain-text sections: CURRENT PICTURE, TOP DEVELOPMENTS (maximum 4 bullets), WHAT TO MONITOR (maximum 3 bullets). Distinguish confirmed reporting from uncertainty. Do not use Markdown bold markers, persuade voters, or recommend partisan messaging.\n\nHEADLINES:\n${articles.map((item) => `${item.title} (${item.source})`).join('\n')}`;
+
+  if (process.env.GROQ_API_KEY) {
+    try {
+      try {
+        const text = await callGroq(newsPrompt, groqNewsModel);
+        return res.json({ summary: text, model: groqNewsModel, provider: 'groq' });
+      } catch (searchError) {
+        console.error('[groq-news] search model failed:', searchError.status || '', searchError.message);
+        const result = await callGroqWithFallback(newsPrompt);
+        return res.json({ summary: result.text, model: result.model, provider: 'groq' });
+      }
+    } catch (error) {
+      console.error('[groq-news] both models failed:', error.status || '', error.message);
+    }
+  }
+
+  if (process.env.GEMINI_API_KEY) {
+    const prompt = newsPrompt;
+    const call = async (model) => {
+      const r = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${encodeURIComponent(process.env.GEMINI_API_KEY)}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ contents: [{ parts: [{ text: prompt }] }] }),
+      });
+      const b = await r.json().catch(() => ({}));
+      if (!r.ok) {
+        console.error('[gemini-news]', r.status, b?.error?.message || 'request failed');
+        throw new Error(b?.error?.message || 'Gemini failed');
+      }
+      return b.candidates?.[0]?.content?.parts?.map((p) => p.text || '').join('') || '';
+    };
+    try {
+      let model = process.env.GEMINI_MODEL || 'gemini-3.1-flash-lite';
+      let summary;
+      try { summary = await call(model); } catch { model = process.env.GEMINI_FALLBACK_MODEL || 'gemini-3-flash'; summary = await call(model); }
+      return res.json({ summary, model, provider: 'gemini' });
+    } catch (error) {
+      console.error('[gemini-news] both models failed:', error.message);
+      return res.json({ provider: 'local', model: 'statistical-fallback', summary: `AI provider unavailable. ${articles.length} Kwara-related headlines were retrieved. Review the linked sources, prioritize the newest reports, and verify claims against official Kwara State and INEC channels before acting.` });
+    }
+  }
+
+  if (process.env.OPENAI_API_KEY) {
+    const prompt = `Summarize these election news headlines neutrally. Identify the hottest themes, confirmed facts versus uncertainty, and operational implications. Do not persuade voters or recommend partisan messaging.\n${articles.map((item) => `${item.title} (${item.source})`).join('\n')}`;
+    const call = async (model) => {
+      const r = await fetch('https://api.openai.com/v1/responses', {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${process.env.OPENAI_API_KEY}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ model, input: prompt, max_output_tokens: 600 }),
+      });
+      const b = await r.json().catch(() => ({}));
+      if (!r.ok) { const e = new Error(b?.error?.message || 'AI request failed'); e.status = r.status; throw e; }
+      return b.output_text || '';
+    };
+    try {
+      let model = openAiPrimaryModel;
+      let summary;
+      try { summary = await call(model); } catch (e) { if (![400, 404, 429].includes(e.status)) throw e; model = openAiFallbackModel; summary = await call(model); }
+      return res.json({ summary, model, provider: 'openai' });
+    } catch {
+      return res.status(503).json({ message: 'AI news summary unavailable.' });
+    }
+  }
+
+  return res.json({ summary: summarizeNewsLocally(articles), provider: 'local', model: 'local-fallback' });
+}));
+app.post('/api/analysis/ai', auth, adminOnly, rateLimit, asyncRoute(async (req, res) => {
+  const context = req.body?.context || {};
+  const operationalPrompt = `Produce a concise, neutral Kwara election-operations briefing from this structured data. Return no more than 180 words with exactly these plain-text sections: STATUS, URGENT RISKS (maximum 4 bullets), NEXT ACTIONS (maximum 4 bullets), CONFIDENCE. Prioritize verified SOS and critical incidents, missing evidence, reporting coverage, and vote-data uncertainty. Avoid repeating the raw counts more than once. Do not use Markdown bold markers, target voters, or recommend partisan persuasion.\n\nDATA:\n${JSON.stringify(context)}`;
+
+  if (process.env.GROQ_API_KEY) {
+    try {
+      const result = await callGroqWithFallback(operationalPrompt);
+      return res.json({ analysis: result.text, model: result.model, provider: 'groq' });
+    } catch (error) {
+      console.error('[groq-analysis] both models failed:', error.status || '', error.message);
+    }
+  }
+
+  if (process.env.GEMINI_API_KEY) {
+    const prompt = operationalPrompt;
+    const call = async (model) => {
+      const r = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${encodeURIComponent(process.env.GEMINI_API_KEY)}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ contents: [{ parts: [{ text: prompt }] }] }),
+      });
+      const b = await r.json().catch(() => ({}));
+      if (!r.ok) {
+        console.error('[gemini-analysis]', r.status, b?.error?.message || 'request failed');
+        throw new Error(b?.error?.message || 'Gemini failed');
+      }
+      return b.candidates?.[0]?.content?.parts?.map((p) => p.text || '').join('') || '';
+    };
+    try {
+      let model = process.env.GEMINI_MODEL || 'gemini-3.1-flash-lite';
+      let analysis;
+      try { analysis = await call(model); } catch { model = process.env.GEMINI_FALLBACK_MODEL || 'gemini-3-flash'; analysis = await call(model); }
+      return res.json({ analysis, model, provider: 'gemini' });
+    } catch (error) {
+      console.error('[gemini-analysis] both models failed:', error.message);
+      return res.json({ analysis: analyzeContextLocally(context), provider: 'local', model: 'local-fallback' });
+    }
+  }
+
+  if (process.env.OPENAI_API_KEY) {
+    const sanitizedContext = sanitizeString(JSON.stringify(context), '').slice(0, 12000);
+    if (!sanitizedContext) return res.status(400).json({ message: 'Analysis context is required.' });
+    const prompt = `Provide a neutral operational election-monitoring analysis from this structured data. Do not persuade voters, target demographic groups, or recommend partisan messaging. Summarize uncertainty, data quality, incident/SOS priorities, and verification actions.\n\nDATA:\n${sanitizedContext}`;
+    const callModel = async (model) => {
+      const response = await fetch('https://api.openai.com/v1/responses', {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${process.env.OPENAI_API_KEY}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ model, input: prompt, max_output_tokens: 700 }),
+      });
+      const body = await response.json().catch(() => ({}));
+      if (!response.ok) { const error = new Error(body?.error?.message || 'OpenAI request failed'); error.status = response.status; throw error; }
+      return body.output_text || body.output?.flatMap((item) => item.content || []).map((item) => item.text || '').join('') || '';
+    };
+    try {
+      let usedModel = openAiPrimaryModel;
+      let analysis;
+      try { analysis = await callModel(usedModel); } catch (error) {
+        if (usedModel === openAiFallbackModel || ![400, 404, 429].includes(error.status)) throw error;
+        usedModel = openAiFallbackModel;
+        analysis = await callModel(usedModel);
+      }
+      return res.json({ analysis, model: usedModel, fallbackUsed: usedModel !== openAiPrimaryModel, provider: 'openai' });
+    } catch (error) {
+      console.error('AI analysis unavailable:', error.message);
+      return res.status(503).json({ message: 'AI analysis is temporarily unavailable; statistical analysis remains available.' });
+    }
+  }
+
+  return res.json({ analysis: analyzeContextLocally(context), provider: 'local', model: 'local-fallback' });
+}));
+app.get('/api/admin/ip-log', auth, adminOnly, rateLimit, (req, res) => {
   const { userId, type, limit = 200 } = req.query;
   let results = ipLog;
   if (userId) results = results.filter(entry => entry.userId === userId);
   if (type) results = results.filter(entry => entry.type === type);
   res.json(results.slice(0, Number(limit)));
 });
-app.post('/api/auth/login', asyncRoute(async (req, res) => {
-  const user = await store.userByEmail(String(req.body.email || ''));
-  if (!user || !(await bcrypt.compare(req.body.password || '', user.password))) return res.status(401).json({ message: 'Invalid email or password' });
+app.post('/api/auth/login', loginRateLimit, asyncRoute(async (req, res) => {
+  const email = sanitizeString(req.body.email || '').toLowerCase();
+  const password = String(req.body.password || '');
+  if (!validateEmail(email) || !password || password.length > 1024) return res.status(400).json({ message: 'A valid email and password are required.' });
+  const user = await store.userByEmail(email);
+  if (!user || !(await bcrypt.compare(password, user.password))) return res.status(401).json({ message: 'Invalid email or password' });
+  if (!user.active) return res.status(403).json({ message: 'This account is disabled.' });
   const safe = publicUser(user);
-  res.json({ token: jwt.sign(safe, secret, { expiresIn: '8h' }), user: safe });
+  const token = issueToken(user);
+  res.setHeader('Set-Cookie', sessionCookie(token));
+  res.json({ token, user: safe });
 }));
-app.get('/api/users', auth, asyncRoute(async (req, res) => res.json(visibleUsersFor(req.user, await store.users()).map(publicUser))));
-app.get('/api/report-viewers', auth, asyncRoute(async (req, res) => res.json(visibleUsersFor(req.user, await store.users()).map(publicUser))));
-app.post('/api/users', auth, asyncRoute(async (req, res) => {
+app.post('/api/auth/logout', (req, res) => { res.setHeader('Set-Cookie', clearSessionCookie); res.status(204).end(); });
+app.put('/api/profile', auth, rateLimit, asyncRoute(async (req, res) => {
+  const current = await store.userByEmail(req.user.email);
+  if (!current) return res.status(404).json({ message: 'Account not found' });
+  const password = String(req.body.password || '');
+  const nextName = sanitizeString(req.body.name || current.name).trim();
+  const nextEmail = sanitizeString(req.body.email || current.email).trim().toLowerCase();
+  const nextStation = sanitizeString(req.body.station || current.station || '').trim();
+  if (!validateEmail(nextEmail)) return res.status(400).json({ message: 'A valid email is required.' });
+  if (password && !validatePassword(password)) return res.status(400).json({ message: 'Password must be at least 12 characters and include upper, lower, number, and special characters.' });
+  if (password && !(await bcrypt.compare(String(req.body.currentPassword || ''), current.password))) return res.status(403).json({ message: 'Current password is incorrect.' });
+  const existing = (await store.users()).find(user => user.id !== current.id && user.email.toLowerCase() === nextEmail);
+  if (existing) return res.status(409).json({ message: 'Email is already in use' });
+  const updated = await store.updateUserProfile(current.id, { name: nextName, email: nextEmail, station: nextStation, password: password ? await bcrypt.hash(password, 10) : null });
+  const safe = publicUser(updated); const token = issueToken(updated);
+  res.setHeader('Set-Cookie', sessionCookie(token));
+  res.json({ user: safe, token });
+}));
+app.get('/api/users', auth, rateLimit, asyncRoute(async (req, res) => res.json(visibleUsersFor(req.user, await store.users()).map(publicUser))));
+app.get('/api/report-viewers', auth, rateLimit, asyncRoute(async (req, res) => res.json(visibleUsersFor(req.user, await store.users()).map(publicUser))));
+app.post('/api/users', auth, rateLimit, asyncRoute(async (req, res) => {
   if (!canManageUsers(req.user)) return res.status(403).json({ message: 'You do not have lower ranks to manage' });
   const email = String(req.body.email || '').trim().toLowerCase();
   const role = req.body.role || 'Agent';
   const rank = String(req.body.rank || '').trim();
-  if (!req.body.name || !email || !req.body.password) return res.status(400).json({ message: 'Name, email and password are required' });
+  if (!req.body.name || !validateEmail(email) || !req.body.password) return res.status(400).json({ message: 'Name, a valid email and password are required' });
   if (!rank) return res.status(400).json({ message: 'Rank is required' });
   if (!canCreateUser(req.user, rank, role)) return res.status(403).json({ message: 'You can only create accounts below your rank' });
+  if (!validatePassword(String(req.body.password || ''))) return res.status(400).json({ message: 'Password must be at least 12 characters and include upper, lower, number, and special characters.' });
   if ((await store.users()).some(user => user.email.toLowerCase() === email)) return res.status(409).json({ message: 'An account with that email already exists' });
   const user = {
-    id: `u${Date.now()}`,
-    name: String(req.body.name).trim(), email,
-    password: await bcrypt.hash(req.body.password, 10),
+    id: createId('u'),
+    name: sanitizeString(req.body.name).trim(), email,
+    password: await bcrypt.hash(String(req.body.password), 10),
     role, rank: role,
     active: true,
     unit: req.body.unit || 'Field Unit',
@@ -601,14 +1043,14 @@ app.post('/api/users', auth, asyncRoute(async (req, res) => {
     lga: String(req.body.lga || '').trim(),
     ward: String(req.body.ward || '').trim(),
     pollingUnit: String(req.body.pollingUnit || '').trim(),
-    lat: Number(req.body.lat) || 7.3775,
-    lng: Number(req.body.lng) || 3.9470
+    lat: Number(req.body.lat) || 8.4799,
+    lng: Number(req.body.lng) || 4.5418
   };
   const created = await store.createUser(user);
   io.emit('user:created', publicUser(created));
   res.status(201).json(publicUser(created));
 }));
-app.delete('/api/users/:id', auth, asyncRoute(async (req, res) => {
+app.delete('/api/users/:id', auth, rateLimit, asyncRoute(async (req, res) => {
   if (req.params.id === req.user.id) return res.status(400).json({ message: 'You cannot delete your own account' });
   const target = (await store.users()).find(user => user.id === req.params.id);
   if (!canDeleteUser(req.user, target)) return res.status(403).json({ message: 'You are not allowed to delete this account' });
@@ -617,9 +1059,10 @@ app.delete('/api/users/:id', auth, asyncRoute(async (req, res) => {
   io.emit('user:deleted', req.params.id);
   res.status(204).end();
 }));
-app.put('/api/users/:id', auth, asyncRoute(async (req, res) => {
+app.put('/api/users/:id', auth, rateLimit, asyncRoute(async (req, res) => {
   const target = (await store.users()).find(user => user.id === req.params.id);
   if (!target) return res.status(404).json({ message: 'User not found' });
+  if (req.user.id === target.id) return res.status(400).json({ message: 'Use the profile endpoint to update your own account' });
   if (req.user.id !== target.id && req.user.role !== 'Super Admin' && !canManageRank(req.user.rank, target.rank)) return res.status(403).json({ message: 'You can only update accounts below your rank' });
   const changes = {
     name: String(req.body.name || target.name).trim(),
@@ -636,16 +1079,16 @@ app.put('/api/users/:id', auth, asyncRoute(async (req, res) => {
     lga: String(req.body.lga || target.lga).trim(),
     ward: String(req.body.ward || target.ward).trim(),
     pollingUnit: String(req.body.pollingUnit || target.pollingUnit).trim(),
-    lat: Number(req.body.lat ?? target.lat) || 7.3775,
-    lng: Number(req.body.lng ?? target.lng) || 3.9470,
+    lat: Number(req.body.lat ?? target.lat) || 8.4799,
+    lng: Number(req.body.lng ?? target.lng) || 4.5418,
   };
   const existing = (await store.users()).find(user => user.id !== target.id && user.email.toLowerCase() === changes.email.toLowerCase());
   if (existing) return res.status(409).json({ message: 'Email is already in use' });
   const updated = await store.updateUser(req.params.id, changes);
-  io.emit('user:updated', updated);
-  res.json(updated);
+  io.emit('user:updated', publicUser(updated));
+  res.json(publicUser(updated));
 }));
-app.put('/api/users/:id/role', auth, adminOnly, asyncRoute(async (req, res) => {
+app.put('/api/users/:id/role', auth, adminOnly, rateLimit, asyncRoute(async (req, res) => {
   const target = (await store.users()).find(user => user.id === req.params.id);
   if (!target) return res.status(404).json({ message: 'User not found' });
   if (!canManageRank(req.user.rank, target.rank)) return res.status(403).json({ message: 'You can only change roles for accounts below your rank' });
@@ -665,48 +1108,61 @@ app.put('/api/users/:id/role', auth, adminOnly, asyncRoute(async (req, res) => {
   io.emit('user:updated', publicUser(updated));
   res.json(publicUser(updated));
 }));
-app.put('/api/users/:id/password', auth, asyncRoute(async (req, res) => {
+app.put('/api/users/:id/password', auth, rateLimit, asyncRoute(async (req, res) => {
   const users = await store.users();
-  const current = users.find(user => user.id === req.user.id);
-  if (!current) return res.status(404).json({ message: 'Account not found' });
-  const email = String(req.body.email || current.email).trim().toLowerCase();
-  if (users.some(user => user.id !== current.id && user.email.toLowerCase() === email)) return res.status(409).json({ message: 'Email is already in use' });
+  const target = users.find(user => user.id === req.params.id);
+  if (!target) return res.status(404).json({ message: 'Account not found' });
+  if (target.id === req.user.id) return res.status(400).json({ message: 'Use the profile endpoint to change your own password' });
+  if (!canDeleteUser(req.user, target)) return res.status(403).json({ message: 'You cannot reset this account password' });
   const password = String(req.body.password || '');
-  if (password && password.length < 6) return res.status(400).json({ message: 'Password must be at least 6 characters' });
-  const updated = await store.updateUserProfile(current.id, { name: String(req.body.name || current.name).trim(), email, station: String(req.body.station || current.station || '').trim(), password: password ? await bcrypt.hash(password, 10) : null });
-  const safe = publicUser(updated); const token = jwt.sign(safe, secret, { expiresIn: '8h' });
-  res.json({ user: safe, token });
+  if (!validatePassword(password)) return res.status(400).json({ message: 'Password must be at least 12 characters and include upper, lower, number, and special characters.' });
+  await store.updateUserPassword(target.id, await bcrypt.hash(password, 12));
+  res.status(204).end();
 }));
-app.get('/api/parties', auth, asyncRoute(async (_, res) => res.json(await store.parties())));
-app.put('/api/parties', auth, adminOnly, asyncRoute(async (req, res) => {
-  const parties = [...new Set((Array.isArray(req.body.parties) ? req.body.parties : []).map(value => String(value).trim()).filter(Boolean))].slice(0, 100);
+app.get('/api/parties', auth, rateLimit, asyncRoute(async (_, res) => res.json(await store.parties())));
+app.put('/api/parties', auth, adminOnly, rateLimit, asyncRoute(async (req, res) => {
+  const seen = new Set();
+  const parties = (Array.isArray(req.body.parties) ? req.body.parties : [])
+    .map(value => sanitizeString(value).trim().slice(0, 100))
+    .filter(value => {
+      if (!value) return false;
+      const key = value.toLocaleLowerCase('en-NG');
+      if (seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    })
+    .slice(0, 100);
   const saved = await store.setParties(parties);
   io.emit('parties:updated', saved);
   res.json(saved);
 }));
-app.post('/api/results', auth, asyncRoute(async (req, res) => {
+app.post('/api/results', auth, rateLimit, asyncRoute(async (req, res) => {
   const parties = await store.parties();
   const rawEntries = (Array.isArray(req.body.results) ? req.body.results : []).map(item => ({ party: String(item.party || '').trim(), votes: Number(item.votes) })).filter(item => parties.includes(item.party) && Number.isInteger(item.votes) && item.votes >= 0);
   const entries = [...rawEntries.reduce((map, item) => map.set(item.party, { party: item.party, votes: (map.get(item.party)?.votes || 0) + item.votes }), new Map()).values()];
   if (!entries.length) return res.status(400).json({ message: 'Select at least one uploaded party and enter its vote count' });
   const media = Array.isArray(req.body.media) ? req.body.media.slice(0, 3) : [];
+  const mediaValidation = validateMediaPayload(media);
+  if (!mediaValidation.valid) return res.status(400).json({ message: mediaValidation.errors[0] || 'Invalid media payload' });
   if (!media.some(item => item?.type === 'image')) return res.status(400).json({ message: 'A photograph of the signed result is required' });
   const lat = Number(req.body.lat); const lng = Number(req.body.lng);
   if (!Number.isFinite(lat) || !Number.isFinite(lng)) return res.status(400).json({ message: 'Current location is required' });
   const pollingUnit = String(req.user.pollingUnit || req.body.pollingUnit || '').trim();
   if (!pollingUnit) return res.status(400).json({ message: 'The reporting account must have a polling unit' });
   const createdAt = new Date().toISOString();
-  const result = { id: `r${Date.now()}`, title: `Polling Unit Result - ${pollingUnit}`, description: `Submitted by ${req.user.name} at ${createdAt}`, reportType: 'Polling Unit Result', severity: 'Low', status: 'Submitted', lat, lng, assignedTo: '', visibleTo: [], media, geometry: null, style: { source: 'result', icon: 'POI', color: '#d9aa4b', fillColor: '#d9aa4b' }, lga: req.user.lga || req.body.lga || '', ward: req.user.ward || req.body.ward || '', pollingUnit, resultCount: JSON.stringify(entries), createdAt, createdBy: req.user.id };
+  const result = { id: createId('r'), title: `Polling Unit Result - ${sanitizeString(pollingUnit)}`, description: `Submitted by ${sanitizeString(req.user.name)} at ${createdAt}`, reportType: 'Polling Unit Result', severity: 'Low', status: 'Submitted', lat, lng, assignedTo: '', visibleTo: [], media, geometry: null, style: { source: 'result', icon: 'POI', color: '#d9aa4b', fillColor: '#d9aa4b' }, lga: req.user.lga || req.body.lga || '', ward: req.user.ward || req.body.ward || '', pollingUnit, resultCount: JSON.stringify(entries), createdAt, createdBy: req.user.id };
   const created = await store.createIncident(result);
   logIp('result', req.user, created.id, getClientIp(req));
   io.emit('incident:created', created);
   res.status(201).json(created);
 }));
-app.get('/api/incidents', auth, asyncRoute(async (req, res) => res.json((await store.incidents()).filter(incident => canAccessIncident(req.user, incident)))));
-app.post('/api/incidents', auth, asyncRoute(async (req, res) => {
+app.get('/api/incidents', auth, rateLimit, asyncRoute(async (req, res) => res.json((await store.incidents()).filter(incident => canAccessIncident(req.user, incident)))));
+app.post('/api/incidents', auth, rateLimit, asyncRoute(async (req, res) => {
   const media = Array.isArray(req.body.media) ? req.body.media.slice(0, 6) : [];
+  const mediaValidation = validateMediaPayload(media);
+  if (!mediaValidation.valid) return res.status(400).json({ message: mediaValidation.errors[0] || 'Invalid media payload' });
   const mediaBytes = media.reduce((total, item) => total + Buffer.byteLength(String(item?.data || ''), 'utf8'), 0);
-  if (mediaBytes > 14 * 1024 * 1024) return res.status(413).json({ message: 'Incident attachments are too large. Keep the total under 10MB.' });
+  if (mediaBytes > 10 * 1024 * 1024) return res.status(413).json({ message: 'Incident attachments are too large. Keep the total under 10MB.' });
   const allowedTypes = new Set(['SOS-Emergency', 'Vote Buying', 'Thuggery and Violence', 'Voter Intimidation', 'Collusion', 'Compromised Privacy', 'Over-voting', 'Late Opening', 'Material Shortages', 'Missing Registers', 'Lack of Crowd Control', 'BVAS Failure', 'Network Connectivity', 'Battery Depletion']);
   if (['Agent', 'Supervisor'].includes(req.user.role) && !allowedTypes.has(req.body.reportType)) return res.status(403).json({ message: 'This role cannot create that report type' });
   const lga = String(req.user.lga || req.body.lga || '').trim();
@@ -717,22 +1173,50 @@ app.post('/api/incidents', auth, asyncRoute(async (req, res) => {
     ...(isSosIncident(req.body) ? sosVisibleTo({ ...req.user, userId: req.user.id, ...req.body }) : []),
     req.body.assignedTo
   ].filter(Boolean))];
-  const incident = { ...req.body, lga, ward, pollingUnit, visibleTo, media, id: `i${Date.now()}`, createdAt: new Date().toISOString(), createdBy: req.user.id };
+  const incident = {
+    title: normalizeText(req.body.title || 'Incident'),
+    description: normalizeText(req.body.description || ''),
+    reportType: normalizeText(req.body.reportType || 'IP'),
+    severity: ['Low', 'Medium', 'High', 'Critical'].includes(req.body.severity) ? req.body.severity : 'High',
+    status: ['Open', 'In Progress', 'Resolved', 'Submitted'].includes(req.body.status) ? req.body.status : 'Open',
+    lat: Number(req.body.lat), lng: Number(req.body.lng), assignedTo: visibleTo.includes(req.body.assignedTo) ? req.body.assignedTo : '',
+    lga, ward, pollingUnit, visibleTo, media,
+    id: createId('i'), createdAt: new Date().toISOString(), createdBy: req.user.id,
+  };
+  if (!validateCoordinates(incident.lat, incident.lng)) return res.status(400).json({ message: 'Valid incident coordinates are required' });
   const created = await store.createIncident(incident);
   logIp('incident', req.user, created.id, getClientIp(req));
   io.emit('incident:created', created);
   res.status(201).json(created);
 }));
-app.put('/api/incidents/:id', auth, asyncRoute(async (req, res) => {
+app.put('/api/incidents/:id', auth, rateLimit, asyncRoute(async (req, res) => {
   const current = (await store.incidents()).find(item => item.id === req.params.id);
   if (!current || !canAccessIncident(req.user, current)) return res.status(404).json({ message: 'Incident not found' });
-  const incident = await store.updateIncident(req.params.id, req.body);
+  const mayManage = isAdminRole(req.user) || current.createdBy === req.user.id || current.assignedTo === req.user.id;
+  if (!mayManage) return res.status(403).json({ message: 'You may view this incident but cannot modify it' });
+  const allowedKeys = isAdminRole(req.user)
+    ? ['title', 'description', 'severity', 'status', 'assignedTo', 'visibleTo', 'geometry', 'style']
+    : ['description', 'status'];
+  const patch = {};
+  for (const key of allowedKeys) {
+    if (req.body[key] !== undefined) patch[key] = req.body[key];
+  }
+  if (patch.title !== undefined) patch.title = normalizeText(patch.title);
+  if (patch.description !== undefined) patch.description = normalizeText(patch.description);
+  if (patch.status !== undefined && !['Open', 'In Progress', 'Resolved', 'Submitted'].includes(patch.status)) return res.status(400).json({ message: 'Invalid incident status' });
+  if (patch.severity !== undefined && !['Low', 'Medium', 'High', 'Critical'].includes(patch.severity)) return res.status(400).json({ message: 'Invalid incident severity' });
+  if (patch.visibleTo !== undefined) {
+    const knownUserIds = new Set((await store.users()).map(user => user.id));
+    patch.visibleTo = [...new Set((Array.isArray(patch.visibleTo) ? patch.visibleTo : []).filter(id => knownUserIds.has(id)))];
+  }
+  if (!Object.keys(patch).length) return res.status(400).json({ message: 'No permitted incident changes supplied' });
+  const incident = await store.updateIncident(req.params.id, patch);
   if (!incident) return res.status(404).json({ message: 'Incident not found' });
   io.emit('incident:updated', incident);
   res.json(incident);
 }));
-app.delete('/api/incidents/:id', auth, adminOnly, asyncRoute(async (req, res) => { await store.deleteIncident(req.params.id); io.emit('incident:deleted', req.params.id); res.status(204).end(); }));
-app.post('/api/incidents/:id/chat', auth, asyncRoute(async (req, res) => {
+app.delete('/api/incidents/:id', auth, adminOnly, rateLimit, asyncRoute(async (req, res) => { await store.deleteIncident(req.params.id); io.emit('incident:deleted', req.params.id); res.status(204).end(); }));
+app.post('/api/incidents/:id/chat', auth, rateLimit, asyncRoute(async (req, res) => {
   const incident = (await store.incidents()).find(item => item.id === req.params.id);
   if (!incident) return res.status(404).json({ message: 'Incident not found' });
   if (!canAccessIncident(req.user, incident)) return res.status(403).json({ message: 'Only assigned viewers and command can open this incident chat' });
@@ -740,24 +1224,27 @@ app.post('/api/incidents/:id/chat', auth, asyncRoute(async (req, res) => {
   io.emit('chat:room', room);
   res.json(room);
 }));
-app.get('/api/cameras', auth, asyncRoute(async (_, res) => res.json(await store.cameras())));
-app.post('/api/cameras', auth, adminOnly, asyncRoute(async (req, res) => {
+app.get('/api/cameras', auth, rateLimit, asyncRoute(async (_, res) => res.json(await store.cameras())));
+app.post('/api/cameras', auth, adminOnly, rateLimit, asyncRoute(async (req, res) => {
   if (!req.body.name || !req.body.url) return res.status(400).json({ message: 'Camera name and stream URL are required' });
-  const camera = { id: `cam-${Date.now()}`, name: req.body.name, type: req.body.type || 'CCTV', url: req.body.url, lat: Number(req.body.lat) || 7.3775, lng: Number(req.body.lng) || 3.9470, status: 'Online', createdAt: new Date().toISOString() };
+  if (!validateExternalUrl(req.body.url, ['https:'])) return res.status(400).json({ message: 'Camera URL must be an HTTPS URL without embedded credentials' });
+  const lat = Number(req.body.lat ?? 8.4799); const lng = Number(req.body.lng ?? 4.5418);
+  if (!validateCoordinates(lat, lng)) return res.status(400).json({ message: 'Invalid camera coordinates' });
+  const camera = { id: createId('cam'), name: normalizeText(req.body.name), type: normalizeText(req.body.type || 'CCTV'), url: String(req.body.url), lat, lng, status: 'Online', createdAt: new Date().toISOString() };
   const created = await store.createCamera(camera);
   io.emit('camera:created', created);
   res.status(201).json(created);
 }));
-app.delete('/api/cameras/:id', auth, adminOnly, asyncRoute(async (req, res) => { await store.deleteCamera(req.params.id); io.emit('camera:deleted', req.params.id); res.status(204).end(); }));
-app.get('/api/map-layers', auth, asyncRoute(async (_, res) => res.json(await store.mapLayers())));
-app.post('/api/map-layers', auth, superAdminOnly, asyncRoute(async (req, res) => {
+app.delete('/api/cameras/:id', auth, adminOnly, rateLimit, asyncRoute(async (req, res) => { await store.deleteCamera(req.params.id); io.emit('camera:deleted', req.params.id); res.status(204).end(); }));
+app.get('/api/map-layers', auth, rateLimit, asyncRoute(async (_, res) => res.json(await store.mapLayers())));
+app.post('/api/map-layers', auth, superAdminOnly, rateLimit, asyncRoute(async (req, res) => {
   if (!req.body.name || !req.body.type) return res.status(400).json({ message: 'Layer name and type are required' });
-  const layer = { id: `layer-${Date.now()}`, name: String(req.body.name).trim(), type: req.body.type, data: req.body.data || null, url: req.body.url || '', bounds: req.body.bounds || null, opacity: Number(req.body.opacity) || 0.65, fillOpacity: Number(req.body.fillOpacity ?? 0.18), category: req.body.category || (req.body.type === 'raster' ? 'Raster' : 'Point'), operationalUse: req.body.operationalUse || 'Reference', color: req.body.color || '#facc15', fillColor: req.body.fillColor || req.body.color || '#f59e0b', lineWeight: Number(req.body.lineWeight) || 2, lineStyle: req.body.lineStyle || 'solid', pointIcon: req.body.pointIcon || 'pin', pointIconColor: req.body.pointIconColor || '#ffffff', pointSize: Number(req.body.pointSize) || 24, showLabels: req.body.showLabels ?? true, labelField: req.body.labelField || 'name', popupFields: req.body.popupFields || '', visible: req.body.visible ?? true, zIndex: Number(req.body.zIndex) || 0, createdAt: new Date().toISOString() };
+  const layer = { id: createId('layer'), name: sanitizeString(req.body.name).trim(), type: req.body.type, data: req.body.data || null, url: sanitizeString(req.body.url || ''), bounds: req.body.bounds || null, opacity: Number(req.body.opacity) || 0.65, fillOpacity: Number(req.body.fillOpacity ?? 0.18), category: sanitizeString(req.body.category || (req.body.type === 'raster' ? 'Raster' : 'Point')).trim() || 'Point', operationalUse: sanitizeString(req.body.operationalUse || 'Reference').trim() || 'Reference', color: sanitizeString(req.body.color || '#facc15'), fillColor: sanitizeString(req.body.fillColor || req.body.color || '#f59e0b'), lineWeight: Number(req.body.lineWeight) || 2, lineStyle: sanitizeString(req.body.lineStyle || 'solid'), pointIcon: sanitizeString(req.body.pointIcon || 'pin'), pointIconColor: sanitizeString(req.body.pointIconColor || '#ffffff'), pointSize: Number(req.body.pointSize) || 24, showLabels: req.body.showLabels ?? true, labelField: sanitizeString(req.body.labelField || 'name'), popupFields: sanitizeString(req.body.popupFields || ''), visible: req.body.visible ?? true, zIndex: Number(req.body.zIndex) || 0, createdAt: new Date().toISOString() };
   const created = await store.createMapLayer(layer);
   io.emit('map-layer:created', created);
   res.status(201).json(created);
 }));
-app.put('/api/map-layers/:id', auth, asyncRoute(async (req, res) => {
+app.put('/api/map-layers/:id', auth, rateLimit, asyncRoute(async (req, res) => {
   const allowedKeys = isAdminRole(req.user) ? ['visible', 'opacity', 'fillOpacity', 'color', 'fillColor', 'lineWeight', 'lineStyle', 'pointIcon', 'pointIconColor', 'pointSize', 'showLabels', 'labelField', 'popupFields', 'category', 'operationalUse', 'name', 'zIndex'] : ['visible'];
   const changes = {};
   for (const key of allowedKeys) {
@@ -770,11 +1257,11 @@ app.put('/api/map-layers/:id', auth, asyncRoute(async (req, res) => {
   io.emit('map-layer:updated', updated);
   res.json(updated);
 }));
-app.delete('/api/map-layers/:id', auth, superAdminOnly, asyncRoute(async (req, res) => { await store.deleteMapLayer(req.params.id); io.emit('map-layer:deleted', req.params.id); res.status(204).end(); }));
-app.get('/api/chat/rooms', auth, asyncRoute(async (req, res) => res.json(await store.chatRooms(req.user))));
-app.post('/api/chat/rooms', auth, asyncRoute(async (req, res) => {
+app.delete('/api/map-layers/:id', auth, superAdminOnly, rateLimit, asyncRoute(async (req, res) => { await store.deleteMapLayer(req.params.id); io.emit('map-layer:deleted', req.params.id); res.status(204).end(); }));
+app.get('/api/chat/rooms', auth, rateLimit, asyncRoute(async (req, res) => res.json(await store.chatRooms(req.user))));
+app.post('/api/chat/rooms', auth, rateLimit, asyncRoute(async (req, res) => {
   if (!canManageUsers(req.user)) return res.status(403).json({ message: 'You do not have lower ranks to manage' });
-  const name = String(req.body.name || '').trim();
+  const name = sanitizeString(req.body.name || '').trim();
   if (!name) return res.status(400).json({ message: 'Room name is required' });
   const allowedUsers = visibleUsersFor(req.user, await store.users());
   const allowedIds = new Set(allowedUsers.map(user => user.id));
@@ -783,7 +1270,7 @@ app.post('/api/chat/rooms', auth, asyncRoute(async (req, res) => {
   io.emit('chat:room', room);
   res.status(201).json(room);
 }));
-app.post('/api/chat/rooms/:id/members', auth, asyncRoute(async (req, res) => {
+app.post('/api/chat/rooms/:id/members', auth, rateLimit, asyncRoute(async (req, res) => {
   if (!canManageUsers(req.user)) return res.status(403).json({ message: 'You do not have lower ranks to manage' });
   const room = await store.chatRoom(req.params.id);
   if (!room) return res.status(404).json({ message: 'Chat room not found' });
@@ -793,7 +1280,7 @@ app.post('/api/chat/rooms/:id/members', auth, asyncRoute(async (req, res) => {
   io.emit('chat:room', updated);
   res.json(updated);
 }));
-app.delete('/api/chat/rooms/:id', auth, asyncRoute(async (req, res) => {
+app.delete('/api/chat/rooms/:id', auth, rateLimit, asyncRoute(async (req, res) => {
   if (!canManageUsers(req.user)) return res.status(403).json({ message: 'You do not have lower ranks to manage' });
   const room = await store.chatRoom(req.params.id);
   if (!room) return res.status(404).json({ message: 'Chat room not found' });
@@ -802,58 +1289,87 @@ app.delete('/api/chat/rooms/:id', auth, asyncRoute(async (req, res) => {
   io.emit('chat:deleted', req.params.id);
   res.status(204).end();
 }));
-app.get('/api/chat/rooms/:id/messages', auth, asyncRoute(async (req, res) => {
+app.get('/api/chat/rooms/:id/messages', auth, rateLimit, asyncRoute(async (req, res) => {
   const room = await store.chatRoom(req.params.id);
   if (!canAccessRoom(req.user, room)) return res.status(403).json({ message: 'You cannot view this chat' });
   res.json(await store.chatMessages(req.params.id));
 }));
-app.post('/api/chat/rooms/:id/messages', auth, asyncRoute(async (req, res) => {
+app.post('/api/chat/rooms/:id/messages', auth, rateLimit, asyncRoute(async (req, res) => {
   const room = await store.chatRoom(req.params.id);
   if (!canAccessRoom(req.user, room)) return res.status(403).json({ message: 'You cannot send to this chat' });
-  const body = String(req.body.body || '').trim();
+  const body = normalizeText(req.body.body || '').trim();
   if (!body) return res.status(400).json({ message: 'Message cannot be empty' });
-  const message = await store.createChatMessage({ id: `msg-${Date.now()}`, roomId: req.params.id, senderId: req.user.id, body, createdAt: new Date().toISOString() });
+  const message = await store.createChatMessage({ id: createId('msg'), roomId: req.params.id, senderId: req.user.id, body, createdAt: new Date().toISOString() });
   io.emit('chat:message', { roomId: req.params.id, message });
   res.status(201).json(message);
 }));
-app.post('/api/gps/ping', auth, (req, res) => {
-  const point = { ...req.body, userId: req.user.id, timestamp: new Date().toISOString() };
+app.post('/api/gps/ping', auth, rateLimit, (req, res) => {
+  const lat = Number(req.body.lat); const lng = Number(req.body.lng);
+  if (!validateCoordinates(lat, lng)) return res.status(400).json({ message: 'Invalid GPS coordinates' });
+  const point = { lat, lng, accuracy: Math.max(0, Math.min(Number(req.body.accuracy) || 0, 100_000)), userId: req.user.id, timestamp: new Date().toISOString() };
   io.emit('gps:broadcast', point);
   res.json({ received: true });
 });
 io.use((socket, next) => {
-  try {
-    socket.data.authUser = jwt.verify(socket.handshake.auth?.token || '', secret);
-    next();
-  } catch {
-    next(new Error('Unauthorized realtime connection'));
-  }
+  authenticateToken(socket.handshake.auth?.token || '')
+    .then(user => { socket.data.authUser = user; next(); })
+    .catch(() => next(new Error('Unauthorized realtime connection')));
 });
 io.on('connection', socket => {
   socket.data.user = { ...socket.data.authUser, userId: socket.data.authUser.id };
   socket.on('gps:update', point => {
-    const safePoint = { ...point, userId: socket.data.authUser.id, lat: Number(point.lat), lng: Number(point.lng), timestamp: point.timestamp || new Date().toISOString() };
+    if (!socketLimiter.hit(`gps:${socket.data.authUser.id}`, 30, 60_000).allowed) return;
+    const lat = Number(point?.lat); const lng = Number(point?.lng);
+    if (!validateCoordinates(lat, lng)) return;
+    const safePoint = { userId: socket.data.authUser.id, lat, lng, accuracy: Math.max(0, Math.min(Number(point?.accuracy) || 0, 100_000)), timestamp: new Date().toISOString() };
     socket.data.user = { ...(socket.data.user || {}), userId: safePoint.userId, lat: safePoint.lat, lng: safePoint.lng };
     io.emit('gps:broadcast', safePoint);
   });
   socket.on('gps:stop', () => io.emit('gps:offline', { userId: socket.data.authUser.id, timestamp: new Date().toISOString() }));
   socket.on('emergency:send', alert => {
-    const ip = (socket.handshake.headers['x-forwarded-for'] || '').split(',')[0].trim() || socket.handshake.address || 'unknown';
+    if (!socketLimiter.hit(`emergency:${socket.data.authUser.id}`, 5, 60_000).allowed) return socket.emit('operation:error', { message: 'Too many emergency alerts. Please try again shortly.' });
+    const ip = socket.handshake.address || 'unknown';
     const user = socket.data.authUser;
-    const alertId = alert.id || `em-${Date.now()}`;
+    const lat = Number(alert?.lat); const lng = Number(alert?.lng);
+    if (!validateCoordinates(lat, lng)) return socket.emit('operation:error', { message: 'Invalid emergency location' });
+    const alertId = createId('em');
     logIp('SOS', { id: user.id, name: user.name, role: user.role }, alertId, ip);
-    emitEmergencyAlert(socket, { ...alert, id: alertId, ...(socket.data.user || {}), userId: user.id, name: user.name, role: user.role });
+    emitEmergencyAlert(socket, { ...(socket.data.user || {}), id: alertId, type: normalizeText(alert?.type || 'Emergency'), text: normalizeText(alert?.text || ''), lat, lng, userId: user.id, name: user.name, role: user.role });
   });
-  socket.on('camera:register', user => { const safeUser = { ...user, userId: socket.data.authUser.id, name: socket.data.authUser.name, role: socket.data.authUser.role }; socket.data.cameraUser = { userId: safeUser.userId, name: safeUser.name, role: safeUser.role }; socket.data.user = { ...(socket.data.user || {}), ...safeUser, lat: Number(safeUser.lat), lng: Number(safeUser.lng) }; socket.join(`camera:user:${safeUser.userId}`); if (isAdminRole(safeUser)) socket.emit('camera:shares:list', [...activeCameraShares.values()]); });
-  socket.on('camera:share:start', payload => { const safePayload = { ...payload, userId: socket.data.authUser.id, name: socket.data.authUser.name }; activeCameraShares.set(safePayload.userId, safePayload); socket.broadcast.emit('camera:share:start', safePayload); });
+  socket.on('camera:register', user => {
+    const lat = Number(user?.lat); const lng = Number(user?.lng);
+    const safeUser = { ...socket.data.authUser, userId: socket.data.authUser.id };
+    if (validateCoordinates(lat, lng)) Object.assign(safeUser, { lat, lng });
+    socket.data.cameraUser = { userId: safeUser.userId, name: safeUser.name, role: safeUser.role };
+    socket.data.user = { ...(socket.data.user || {}), ...safeUser };
+    socket.join(`camera:user:${safeUser.userId}`);
+    if (isAdminRole(safeUser)) socket.emit('camera:shares:list', [...activeCameraShares.values()]);
+  });
+  socket.on('camera:share:start', payload => {
+    if (!['Agent', 'Supervisor', 'Response Team'].includes(socket.data.authUser.role)) return;
+    const safePayload = { userId: socket.data.authUser.id, name: socket.data.authUser.name, role: socket.data.authUser.role, mode: normalizeText(payload?.mode || '') };
+    activeCameraShares.set(safePayload.userId, safePayload);
+    for (const client of io.sockets.sockets.values()) if (isAdminRole(client.data.authUser)) client.emit('camera:share:start', safePayload);
+  });
   socket.on('camera:share:stop', () => { const userId = socket.data.authUser.id; activeCameraShares.delete(userId); socket.broadcast.emit('camera:share:stop', { userId }); });
-  socket.on('camera:view:request', ({ officerId }) => io.to(`camera:user:${officerId}`).emit('camera:viewer:request', { viewerSocketId: socket.id }));
-  socket.on('camera:signal', ({ target, data }) => io.to(target).emit('camera:signal', { from: socket.id, fromUserId: socket.data.cameraUser?.userId, fromName: socket.data.cameraUser?.name, data }));
+  socket.on('camera:view:request', ({ officerId } = {}) => {
+    if (!isAdminRole(socket.data.authUser) || !activeCameraShares.has(officerId)) return;
+    io.to(`camera:user:${officerId}`).emit('camera:viewer:request', { viewerSocketId: socket.id });
+  });
+  socket.on('camera:signal', ({ target, data } = {}) => {
+    if (!socketLimiter.hit(`signal:${socket.data.authUser.id}`, 120, 60_000).allowed) return;
+    const peer = io.sockets.sockets.get(target);
+    if (!peer || JSON.stringify(data || {}).length > 100_000) return;
+    const senderIsAdmin = isAdminRole(socket.data.authUser);
+    const peerIsAdmin = isAdminRole(peer.data.authUser);
+    if (senderIsAdmin === peerIsAdmin) return;
+    io.to(target).emit('camera:signal', { from: socket.id, fromUserId: socket.data.authUser.id, fromName: socket.data.authUser.name, data });
+  });
   socket.on('disconnect', () => { const user = socket.data.cameraUser; if (['Agent', 'Supervisor', 'Response Team'].includes(user?.role) && activeCameraShares.has(user.userId)) { activeCameraShares.delete(user.userId); socket.broadcast.emit('camera:share:stop', { userId: user.userId }); } });
 });
 
 app.use((err, _, res, __) => {
-  console.error(err);
+  console.error(process.env.NODE_ENV === 'production' ? (err?.message || 'Unhandled request error') : err);
   res.status(500).json({ message: 'Server error. Please check logs.' });
 });
 

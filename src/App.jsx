@@ -77,7 +77,6 @@ import {
 import {
   DEFAULT_REGISTRATION_STATE,
   NIGERIA_STATES,
-  OYO_LGAS,
   POLLING_UNITS,
   STATE_CODE_TO_NAME,
   normalizeRegistrationState,
@@ -87,14 +86,14 @@ import {
 } from "../shared/electionData.js";
 
 const API = "/api";
-const OYO_CENTER = [7.3775, 3.947];
+const OYO_CENTER = [8.4799, 4.5418];
 const OYO_BOUNDS = [
-  [6.73, 2.67],
-  [8.38, 4.6],
+  [7.75, 2.72],
+  [9.72, 6.23],
 ];
 const severityColor = {
-  Low: "#4ade80",
-  Medium: "#84cc16",
+  Low: "#38bdf8",
+  Medium: "#facc15",
   High: "#fb923c",
   Critical: "#ef4444",
 };
@@ -135,8 +134,8 @@ const CategoryIcon = ({ cat, ...props }) => {
 };
 const CATEGORY_COLORS = {
   Point: "#fb923c",
-  Line: "#84cc16",
-  Polygon: "#4ade80",
+  Line: "#facc15",
+  Polygon: "#38bdf8",
   Raster: "#818cf8",
 };
 const LEGACY_CATEGORY_GEOMETRY = {
@@ -155,13 +154,13 @@ const layerGeometry = (layer) =>
       ? "Raster"
       : LEGACY_CATEGORY_GEOMETRY[layer?.category] || "Point";
 const LAYER_COLORS_PRESET = [
+  "#38bdf8",
+  "#facc15",
   "#4ade80",
-  "#84cc16",
-  "#22c55e",
   "#f87171",
   "#818cf8",
   "#fb923c",
-  "#4ade80",
+  "#60a5fa",
   "#e2e8f0",
 ];
 // POINT_ICONS: each entry is {key, label, Component} for the picker UI, and key is stored as pointIcon value
@@ -486,14 +485,18 @@ const playEmergencyRing = (alert = {}) => {
 async function request(path, token, options = {}) {
   const response = await fetch(`${API}${path}`, {
     ...options,
+    cache: "no-store",
+    credentials: "same-origin",
     headers: {
+      Accept: "application/json",
       "Content-Type": "application/json",
       ...(token ? { Authorization: `Bearer ${token}` } : {}),
       ...options.headers,
     },
   });
-  const body = response.status === 204 ? null : await response.json();
-  if (!response.ok) throw new Error(body?.message || "Request failed");
+  const contentType = response.headers.get("content-type") || "";
+  const body = response.status === 204 ? null : contentType.includes("application/json") ? await response.json() : await response.text();
+  if (!response.ok) throw new Error((typeof body === "object" && body && body.message) || body || "Request failed");
   return body;
 }
 
@@ -842,6 +845,8 @@ function MapView({
   showBoundaryLayer,
   showStateBorders,
   showLgaBorders,
+  showBoundaryNames,
+  partyMapAnalysis,
   selectedBoundaryState,
   onBoundarySelect,
   onBoundaryClear,
@@ -861,17 +866,39 @@ function MapView({
   const nigeriaLgaLabels = useRef([]);
   const hoverBoundaryLayer = useRef(null);
   const [layerPanelOpen, setLayerPanelOpen] = useState(false);
+  const [oyoBoundaries, setOyoBoundaries] = useState({ state: null, lgas: null });
+
+  useEffect(() => {
+    const controller = new AbortController();
+    fetch(`${API}/boundaries/kwara`, { signal: controller.signal })
+      .then(response => response.ok ? response.json() : Promise.reject(new Error("Boundary service unavailable")))
+      .then(data => setOyoBoundaries({ state: data.state || null, lgas: data.lgas || null }))
+      .catch(error => {
+        if (error.name !== "AbortError") console.warn("Kwara boundaries could not be loaded:", error.message);
+      });
+    return () => controller.abort();
+  }, []);
 
   const normalizeBoundaryKey = (value) =>
     String(value || "").trim().toLowerCase().replace(/\s+/g, " ");
+  const normalizeLgaMatch = (value) =>
+    String(value || "").trim().toLowerCase().replace(/[^a-z0-9]+/g, " ").replace(/\s+/g, " ").trim();
+  const escapeMapText = (value) =>
+    String(value || "").replace(/[&<>"']/g, character => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[character]);
+  const partyLgaResults = useMemo(
+    () => Object.fromEntries(Object.entries(partyMapAnalysis?.byLga || {}).map(([name, result]) => [normalizeLgaMatch(name), result])),
+    [partyMapAnalysis],
+  );
 
   const getStateKey = (feature) =>
     normalizeBoundaryKey(
       feature.properties?.STATE_NAME ||
+        feature.properties?.ADM1_EN ||
         feature.properties?.state ||
         feature.properties?.STATE ||
         feature.properties?.state_name ||
         feature.properties?.admin1Name ||
+        feature.properties?.NAME_1 ||
         feature.properties?.name ||
         feature.properties?.NAME ||
         "",
@@ -1375,31 +1402,36 @@ function MapView({
     nigeriaStateLabels.current.forEach(l => l.remove());
     nigeriaStateLabels.current = [];
     if (!showStateBorders) return;
-    // State features: have STATE_NAME / admin1Name / NAME_1 / state properties, no LGA-specific ones
-    const stateFeatures = mapLayers
+    // Kwara State outline only; LGA polygons are rendered separately.
+    const uploadedStateFeatures = mapLayers
       .filter(l => l.visible !== false && l.type === "geojson" && l.data?.features)
       .flatMap(l => l.data.features.filter(f => {
         const p = f.properties || {};
-        const hasState = p.STATE_NAME || p.admin1Name || p.NAME_1 || p.State || (p.state && !p.ADM2_EN && !p.lga_name && !p.LGA);
+        const stateName = p.STATE_NAME || p.ADM1_EN || p.admin1Name || p.NAME_1 || p.State || p.state || "";
+        const hasLga = p.ADM2_EN || p.lga_name || p.LGA || p.lga || p.LTNAME;
         const isPolygon = f.geometry?.type?.includes("Polygon");
-        return hasState && isPolygon;
+        return stateName && !hasLga && normalizeBoundaryKey(stateName).includes("kwara") && isPolygon;
       }));
+    const stateFeatures = uploadedStateFeatures.length
+      ? uploadedStateFeatures
+      : (oyoBoundaries.state?.features || []);
     if (!stateFeatures.length) return;
     const stateLayer = L.geoJSON(
       { type: "FeatureCollection", features: stateFeatures },
       {
         pane: "overlayPane",
         style: () => ({
-          color: "#e2475a",
-          weight: 2.5,
+          color: "#ffd166",
+          weight: 6,
           dashArray: "",
-          fillOpacity: 0.04,
-          fillColor: "#e2475a",
-          opacity: 0.9,
+          fillOpacity: 0.08,
+          fillColor: "#f59e0b",
+          opacity: 1,
         }),
         onEachFeature: (feature, layerGeo) => {
           const name =
             feature.properties?.STATE_NAME ||
+            feature.properties?.ADM1_EN ||
             feature.properties?.admin1Name ||
             feature.properties?.NAME_1 ||
             feature.properties?.State ||
@@ -1412,23 +1444,25 @@ function MapView({
             // Permanent label at centroid
             try {
               const center = layerGeo.getBounds().getCenter();
-              const label = L.marker(center, {
-                icon: L.divIcon({
-                  className: "nigeria-state-label",
-                  html: `<span>${name}</span>`,
-                  iconSize: null,
-                  iconAnchor: [0, 0],
-                }),
-                interactive: false,
-                zIndexOffset: -100,
-              });
-              label.addTo(map);
-              nigeriaStateLabels.current.push(label);
+              if (showBoundaryNames) {
+                const label = L.marker(center, {
+                  icon: L.divIcon({
+                    className: "nigeria-state-label",
+                    html: `<span>${escapeMapText(name)}</span>`,
+                    iconSize: null,
+                    iconAnchor: [0, 0],
+                  }),
+                  interactive: false,
+                  zIndexOffset: -100,
+                });
+                label.addTo(map);
+                nigeriaStateLabels.current.push(label);
+              }
             } catch {}
           }
           layerGeo.on({
             mouseover: (e) => {
-              e.target.setStyle({ weight: 4, color: "#ff3d55", fillOpacity: 0.12, opacity: 1 });
+              e.target.setStyle({ weight: 8, color: "#fff2a8", fillOpacity: 0.16, opacity: 1 });
               if (!L.Browser.ie && !L.Browser.opera && !L.Browser.edge) e.target.bringToFront();
             },
             mouseout: (e) => stateLayer.resetStyle(e.target),
@@ -1443,9 +1477,9 @@ function MapView({
     ).addTo(map);
     nigeriaStateOverlay.current = stateLayer;
     stateLayer.bringToFront();
-  }, [showStateBorders, mapLayers, onBoundarySelect]);
+  }, [showStateBorders, showBoundaryNames, mapLayers, onBoundarySelect, oyoBoundaries.state]);
 
-  // Nigeria LGA boundary overlay (from uploaded geojson layers only)
+  // Kwara State LGA boundary overlay (from uploaded GeoJSON layers).
   useEffect(() => {
     const map = leaflet.current;
     if (!map) return;
@@ -1454,27 +1488,45 @@ function MapView({
     nigeriaLgaLabels.current.forEach(l => l.remove());
     nigeriaLgaLabels.current = [];
     if (!showLgaBorders) return;
-    const lgaFeatures = mapLayers
+    const uploadedLgaFeatures = mapLayers
       .filter(l => l.visible !== false && l.type === "geojson" && l.data?.features)
       .flatMap(l => l.data.features.filter(f => {
         const p = f.properties || {};
         const hasLga = p.ADM2_EN || p.lga_name || p.LGA || p.lga || p.LTNAME;
+        const stateName = p.STATE_NAME || p.ADM1_EN || p.admin1Name || p.NAME_1 || p.State || p.state || "";
+        const belongsToOyo = stateName
+          ? normalizeBoundaryKey(stateName).includes("kwara")
+          : normalizeBoundaryKey(l.name).includes("kwara");
         const isPolygon = f.geometry?.type?.includes("Polygon");
-        return hasLga && isPolygon;
+        return hasLga && belongsToOyo && isPolygon;
       }));
+    const lgaFeatures = uploadedLgaFeatures.length
+      ? uploadedLgaFeatures
+      : (oyoBoundaries.lgas?.features || []);
     if (!lgaFeatures.length) return;
     const lgaLayer = L.geoJSON(
       { type: "FeatureCollection", features: lgaFeatures },
       {
         pane: "overlayPane",
-        style: () => ({
-          color: "#34d399",
-          weight: 1.5,
-          dashArray: "4 5",
-          fillOpacity: 0.03,
-          fillColor: "#34d399",
-          opacity: 0.85,
-        }),
+        style: (feature) => {
+          const name = feature.properties?.ADM2_EN || feature.properties?.lga_name || feature.properties?.LGA || feature.properties?.lga || feature.properties?.LTNAME || feature.properties?.name || "";
+          const status = partyLgaResults[normalizeLgaMatch(name)]?.status || (partyMapAnalysis?.party ? "no-data" : "");
+          const colors = {
+            winning: { line: "#16a34a", fill: "#22c55e" },
+            losing: { line: "#dc2626", fill: "#ef4444" },
+            tied: { line: "#ca8a04", fill: "#facc15" },
+            "no-data": { line: "#ca8a04", fill: "#facc15" },
+          };
+          const selectedColor = colors[status];
+          return {
+            color: selectedColor?.line || "#22d3ee",
+            weight: selectedColor ? 3.5 : 2.75,
+            dashArray: selectedColor ? "" : "7 5",
+            fillOpacity: selectedColor ? 0.42 : 0.025,
+            fillColor: selectedColor?.fill || "#22d3ee",
+            opacity: 1,
+          };
+        },
         onEachFeature: (feature, layerGeo) => {
           const name =
             feature.properties?.ADM2_EN ||
@@ -1485,26 +1537,35 @@ function MapView({
             feature.properties?.name ||
             "";
           if (name) {
-            layerGeo.bindTooltip(name, { permanent: false, sticky: true, className: "nigeria-lga-tooltip" });
+            const performance = partyLgaResults[normalizeLgaMatch(name)];
+            const status = performance?.status || (partyMapAnalysis?.party ? "no-data" : "");
+            const statusLabel = status === "winning" ? "Winning" : status === "losing" ? "Losing" : status === "tied" ? "Tied" : status === "no-data" ? "No submitted result" : "";
+            const margin = performance?.margin ? ` · margin ${Number(performance.margin).toLocaleString()}` : "";
+            const tooltip = partyMapAnalysis?.party
+              ? `<strong>${escapeMapText(name)}</strong><br>${escapeMapText(partyMapAnalysis.party)}: ${escapeMapText(statusLabel)}${escapeMapText(margin)}`
+              : escapeMapText(name);
+            layerGeo.bindTooltip(tooltip, { permanent: false, sticky: true, className: "nigeria-lga-tooltip" });
             try {
               const center = layerGeo.getBounds().getCenter();
-              const label = L.marker(center, {
-                icon: L.divIcon({
-                  className: "nigeria-lga-label",
-                  html: `<span>${name}</span>`,
-                  iconSize: null,
-                  iconAnchor: [0, 0],
-                }),
-                interactive: false,
-                zIndexOffset: -50,
-              });
-              label.addTo(map);
-              nigeriaLgaLabels.current.push(label);
+              if (showBoundaryNames) {
+                const label = L.marker(center, {
+                  icon: L.divIcon({
+                    className: "nigeria-lga-label",
+                    html: `<span>${escapeMapText(name)}</span>`,
+                    iconSize: null,
+                    iconAnchor: [0, 0],
+                  }),
+                  interactive: false,
+                  zIndexOffset: -50,
+                });
+                label.addTo(map);
+                nigeriaLgaLabels.current.push(label);
+              }
             } catch {}
           }
           layerGeo.on({
             mouseover: (e) => {
-              e.target.setStyle({ weight: 3, color: "#22c55e", fillOpacity: 0.14, opacity: 1 });
+              e.target.setStyle({ weight: 4, color: "#a5f3fc", fillOpacity: 0.14, opacity: 1 });
               if (!L.Browser.ie && !L.Browser.opera && !L.Browser.edge) e.target.bringToFront();
             },
             mouseout: (e) => lgaLayer.resetStyle(e.target),
@@ -1519,7 +1580,7 @@ function MapView({
     ).addTo(map);
     nigeriaLgaOverlay.current = lgaLayer;
     lgaLayer.bringToFront();
-  }, [showLgaBorders, mapLayers, onBoundarySelect]);
+  }, [showLgaBorders, showBoundaryNames, mapLayers, onBoundarySelect, oyoBoundaries.lgas, partyMapAnalysis, partyLgaResults]);
 
   useEffect(() => {
     const map = leaflet.current;
@@ -1740,6 +1801,14 @@ function MapView({
   return (
     <>
       <div ref={el} className={`map map-${layer.toLowerCase()}`} />
+      {partyMapAnalysis?.party && (
+        <div className="party-map-legend" role="status" aria-label={`LGA performance map for ${partyMapAnalysis.party}`}>
+          <strong>{partyMapAnalysis.party} by LGA</strong>
+          <span><i className="winning" /> Winning</span>
+          <span><i className="losing" /> Losing</span>
+          <span><i className="undecided" /> Tied / no result</span>
+        </div>
+      )}
       {mapLayers.length > 0 && !layerPanelOpen && (
         <button
           className="layer-panel-open-btn"
@@ -1768,6 +1837,9 @@ function PollingResultForm({ user, point, parties, onClose, onSave }) {
   const [photo, setPhoto] = useState(null);
   const [error, setError] = useState("");
   const submittedAt = useMemo(() => new Date(), []);
+  useEffect(() => {
+    setRows(current => current.map(row => parties.includes(row.party) ? row : { ...row, party: parties[0] || "" }));
+  }, [parties]);
   const addPhoto = (file) => {
     if (!file) return;
     if (!file.type.startsWith("image/") || file.size > 8 * 1024 * 1024) return setError("Choose an image not larger than 8MB.");
@@ -2247,7 +2319,7 @@ function OfficerManager({
     rank: defaultRole,
     unit: "Field Team",
     unitType: "Field Team",
-    command: "Oyo State Election Operations",
+    command: "Kwara State Election Operations",
     division: "",
     station: "",
     state: isSupervisor ? currentUser.state : DEFAULT_REGISTRATION_STATE,
@@ -3577,7 +3649,7 @@ function MapDataPanel({
                   required
                   value={form.name}
                   onChange={(e) => setForm({ ...form, name: e.target.value })}
-                  placeholder="e.g. Oyo LGA Boundaries"
+                  placeholder="e.g. Kwara LGA Boundaries"
                 />
               </label>
               {mode === "geojson" && (
@@ -3624,7 +3696,7 @@ function MapDataPanel({
                     required
                     value={form.url}
                     onChange={(e) => setForm({ ...form, url: e.target.value })}
-                    placeholder="https://example.com/oyo-map.png"
+                    placeholder="https://example.com/kwara-map.png"
                   />
                 </label>
                 <label className="mdp-label">
@@ -4480,7 +4552,7 @@ function AnalyticsPanel({
   const resolvedPct = totalIncidents ? Math.round((resolvedCount / totalIncidents) * 100) : 0;
 
   // Donut chart values for severity
-  const severityColors = { Low: "#4ade80", Medium: "#84cc16", High: "#fb923c", Critical: "#ef4444" };
+  const severityColors = { Low: "#38bdf8", Medium: "#facc15", High: "#fb923c", Critical: "#ef4444" };
   const donutR = 54;
   const donutCx = 70;
   const donutCy = 70;
@@ -4690,106 +4762,106 @@ function AnalyticsPanel({
   );
 }
 
-function ResultsCenter({ incidents, onClose, token }) {
+function ResultsCenter({ incidents, parties = [], onClose, authToken, initialFocusParty = "", onPartyMapChange }) {
+  const [view, setView] = useState("breakdown");
+  const [focusParty, setFocusParty] = useState(initialFocusParty);
+  const [aiOutlook, setAiOutlook] = useState("");
+  const [aiOutlookLoading, setAiOutlookLoading] = useState(false);
   const [news, setNews] = useState([]);
-  const [newsOpen, setNewsOpen] = useState(false);
   const [newsLoading, setNewsLoading] = useState(false);
-  const [aiSummary, setAiSummary] = useState("");
-  const loadNews = () => { setNewsLoading(true); request('/news?q=Ilorin%20Kwara%20election', token).then(data => setNews(data.articles || [])).catch(() => setNews([])).finally(() => setNewsLoading(false)); };
-  const [activeTab, setActiveTab] = useState("breakdown"); // "breakdown" | "winloss"
-  const [winLossView, setWinLossView] = useState("ward"); // "ward" | "lga" | "party"
-  const [focusParty, setFocusParty] = useState(null);
-
+  const [newsError, setNewsError] = useState("");
+  const [newsSummary, setNewsSummary] = useState("");
+  const [newsSummaryError, setNewsSummaryError] = useState("");
+  const [newsSummaryLoading, setNewsSummaryLoading] = useState(false);
+  useEffect(() => {
+    if (view !== "news" || news.length) return;
+    setNewsLoading(true);
+    request("/news?q=Kwara State", authToken).then(data => setNews(data.articles || [])).catch(error => { setNews([]); setNewsError(error.message || "News service unavailable"); }).finally(() => setNewsLoading(false));
+  }, [view, news.length]);
   const reports = useMemo(
     () => incidents.filter((item) => item.reportType === POLLING_RESULT_TYPE),
     [incidents],
   );
-
   const summary = useMemo(() => {
     const rows = reports.map((report) => {
       let results = [];
       try { const parsed = JSON.parse(report.resultCount || "[]"); if (Array.isArray(parsed)) results = parsed; } catch { results = parseResultEntries(report.resultCount).map(item => ({ party: item.label, votes: item.value })); }
       return { ...report, results };
     });
-    const partyNames = [...new Set(rows.flatMap(row => row.results.map(item => item.party)))];
+    const historicalParties = rows.flatMap(row => row.results.map(item => item.party));
+    const partyNames = [...new Set([...parties, ...historicalParties].filter(Boolean))];
     const totals = Object.fromEntries(partyNames.map(party => [party, rows.reduce((sum, row) => sum + Number(row.results.find(item => item.party === party)?.votes || 0), 0)]));
     return {
       partyNames, totals,
       rows: rows.sort((a, b) => `${a.lga}${a.ward}${a.pollingUnit}`.localeCompare(`${b.lga}${b.ward}${b.pollingUnit}`)),
     };
-  }, [reports]);
-
-  // Compute top-6 parties by total votes
-  const top6 = useMemo(() => {
-    return summary.partyNames
-      .slice()
-      .sort((a, b) => (summary.totals[b] || 0) - (summary.totals[a] || 0))
-      .slice(0, 6);
-  }, [summary]);
-
-  // Aggregate votes by ward and by LGA for top-6 parties
-  const winLossSummary = useMemo(() => {
-    if (!top6.length || !summary.rows.length) return { byWard: [], byLga: [] };
-
-    // Helper: sum votes per party in a group of rows
-    const sumVotes = (rows) => {
-      const votes = {};
-      for (const party of top6) votes[party] = 0;
-      for (const row of rows) {
-        for (const party of top6) {
-          votes[party] += Number(row.results.find(r => r.party === party)?.votes || 0);
-        }
-      }
-      return votes;
+  }, [reports, parties]);
+  const top6 = useMemo(() => summary.partyNames.slice().sort((a,b) => summary.totals[b]-summary.totals[a]).slice(0,6), [summary]);
+  const winLoss = useMemo(() => {
+    const groups = (key) => {
+      const map = new Map();
+      for (const row of summary.rows) { const id = key(row); if (!map.has(id)) map.set(id, { label: id, rows: [] }); map.get(id).rows.push(row); }
+      return [...map.values()].map(group => {
+        const votes = Object.fromEntries(summary.partyNames.map(p => [p, group.rows.reduce((n,r) => n + Number(r.results.find(x => x.party === p)?.votes || 0), 0)]));
+        const max = Math.max(0, ...Object.values(votes));
+        const leaders = max ? summary.partyNames.filter(p => votes[p] === max) : [];
+        return { ...group, votes, max, leaders, winner: leaders.length === 1 ? leaders[0] : null, tied: leaders.length > 1 };
+      });
     };
-
-    // Group by ward (LGA + Ward key)
-    const wardMap = {};
-    for (const row of summary.rows) {
-      const key = `${row.lga || "Unknown LGA"}|||${row.ward || "Unknown Ward"}`;
-      if (!wardMap[key]) wardMap[key] = { lga: row.lga || "Unknown LGA", ward: row.ward || "Unknown Ward", rows: [] };
-      wardMap[key].rows.push(row);
-    }
-    const byWard = Object.values(wardMap).map(({ lga, ward, rows }) => {
-      const votes = sumVotes(rows);
-      const maxVotes = Math.max(...Object.values(votes));
-      const winner = maxVotes > 0 ? top6.find(p => votes[p] === maxVotes) : null;
-      return { lga, ward, votes, winner, units: rows.length };
-    }).sort((a, b) => `${a.lga}${a.ward}`.localeCompare(`${b.lga}${b.ward}`));
-
-    // Group by LGA
-    const lgaMap = {};
-    for (const row of summary.rows) {
-      const key = row.lga || "Unknown LGA";
-      if (!lgaMap[key]) lgaMap[key] = { lga: key, rows: [] };
-      lgaMap[key].rows.push(row);
-    }
-    const byLga = Object.values(lgaMap).map(({ lga, rows }) => {
-      const votes = sumVotes(rows);
-      const maxVotes = Math.max(...Object.values(votes));
-      const winner = maxVotes > 0 ? top6.find(p => votes[p] === maxVotes) : null;
-      return { lga, votes, winner, wards: [...new Set(rows.map(r => r.ward))].length, units: rows.length };
-    }).sort((a, b) => a.lga.localeCompare(b.lga));
-
-    return { byWard, byLga };
-  }, [summary, top6]);
-
-  // Per-party breakdown: where they win and lose
-  const partyBreakdown = useMemo(() => {
+    return { wards: groups(r => `${r.lga || "Unknown LGA"} / ${r.ward || "Unknown Ward"}`), lgas: groups(r => r.lga || "Unknown LGA") };
+  }, [summary]);
+  const forecast = useMemo(() => {
+    const total = Object.values(summary.totals).reduce((a, b) => a + b, 0);
+    const ranked = summary.partyNames.slice().sort((a,b) => summary.totals[b] - summary.totals[a]);
+    const leader = ranked[0] || null;
+    const second = ranked[1] ? summary.totals[ranked[1]] : 0;
+    const margin = leader ? summary.totals[leader] - second : 0;
+    const coverage = new Set(summary.rows.map(r => `${r.lga}|${r.ward}|${r.pollingUnit}`)).size;
+    return { leader, margin, total, coverage, confidence: total && leader ? Math.min(99, Math.round((summary.totals[leader] / total) * 100 + Math.min(20, coverage / 10))) : 0 };
+  }, [summary]);
+  const partyAnalysis = useMemo(() => {
     if (!focusParty) return null;
-    const winningWards = winLossSummary.byWard.filter(r => r.winner === focusParty);
-    const losingWards = winLossSummary.byWard.filter(r => r.winner && r.winner !== focusParty);
-    const winningLgas = winLossSummary.byLga.filter(r => r.winner === focusParty);
-    const losingLgas = winLossSummary.byLga.filter(r => r.winner && r.winner !== focusParty);
-    return { winningWards, losingWards, winningLgas, losingLgas };
-  }, [focusParty, winLossSummary]);
-
-  const PARTY_COLORS = ["#f5dc9a", "#6ee7b7", "#93c5fd", "#fca5a5", "#c4b5fd", "#fdba74"];
-  const partyColor = (party) => {
-    const idx = top6.indexOf(party);
-    return idx >= 0 ? PARTY_COLORS[idx] : "#aaa";
-  };
-
+    const wards = winLoss.wards.filter(g => g.winner === focusParty).length;
+    const assessedLgas = winLoss.lgas.filter(g => g.max > 0);
+    const winningLgas = assessedLgas.filter(g => g.winner === focusParty).map(g => {
+      const runnerUp = Object.entries(g.votes).filter(([party]) => party !== focusParty).sort((a, b) => b[1] - a[1])[0] || ["No challenger", 0];
+      return { name: g.label, votes: g.votes[focusParty] || 0, opponent: runnerUp[0], opponentVotes: runnerUp[1], margin: (g.votes[focusParty] || 0) - runnerUp[1] };
+    }).sort((a, b) => b.margin - a.margin);
+    const losingLgas = assessedLgas.filter(g => g.winner && g.winner !== focusParty).map(g => ({
+      name: g.label,
+      votes: g.votes[focusParty] || 0,
+      opponent: g.winner,
+      opponentVotes: g.votes[g.winner] || 0,
+      margin: (g.votes[g.winner] || 0) - (g.votes[focusParty] || 0)
+    })).sort((a, b) => b.margin - a.margin);
+    const tiedLgas = assessedLgas.filter(g => g.tied && g.leaders.includes(focusParty)).map(g => g.label);
+    const incidentsForParty = incidents.filter(i => String(i.description || "").toLowerCase().includes(focusParty.toLowerCase())).length;
+    return { votes: summary.totals[focusParty] || 0, wards, lgas: winningLgas.length, winningLgas, losingLgas, tiedLgas, incidents: incidentsForParty };
+  }, [focusParty, incidents, summary, winLoss]);
+  useEffect(() => {
+    if (!onPartyMapChange) return;
+    if (!focusParty || !partyAnalysis) {
+      onPartyMapChange(null);
+      return;
+    }
+    const byLga = {};
+    partyAnalysis.winningLgas.forEach(item => { byLga[item.name] = { ...item, status: "winning" }; });
+    partyAnalysis.losingLgas.forEach(item => { byLga[item.name] = { ...item, status: "losing" }; });
+    partyAnalysis.tiedLgas.forEach(name => { byLga[name] = { name, status: "tied" }; });
+    onPartyMapChange({ party: focusParty, byLga });
+  }, [focusParty, partyAnalysis, onPartyMapChange]);
+  const actions = useMemo(() => {
+    const critical = incidents.filter(i => i.severity === "Critical" || i.reportType === "SOS-Emergency").length;
+    const open = incidents.filter(i => !["Resolved", "Submitted"].includes(i.status)).length;
+    const actions = [];
+    if (critical) actions.push(`Prioritize ${critical} critical/SOS item${critical === 1 ? "" : "s"} for response verification.`);
+    if (open > critical) actions.push(`Review ${open - critical} other open incident${open - critical === 1 ? "" : "s"} before the next reporting cycle.`);
+    if (forecast.coverage < 10) actions.push("Increase polling-unit reporting coverage before treating the forecast as reliable.");
+    if (forecast.margin === 0 && forecast.leader) actions.push("Treat the race as too close to call; validate submitted totals and missing units.");
+    if (!actions.length) actions.push("Continue verification and monitor new submissions; no exceptional operational signal detected.");
+    return actions;
+  }, [incidents, forecast]);
+  const cleanAiText = (value) => String(value || "").replace(/\*\*/g, "").trim();
   return (
     <div className="results-center">
       <header className="results-center-head">
@@ -4798,270 +4870,36 @@ function ResultsCenter({ incidents, onClose, token }) {
           <h1>Election result progress</h1>
           <p>Live totals for every political party uploaded by Admin.</p>
         </div>
-        <div><button className="secondary" onClick={() => { setNewsOpen(true); loadNews(); }}>Ilorin News</button> <button className="primary" onClick={() => request('/analysis/ai', token, { method: 'POST', body: JSON.stringify({ context: { incidents: incidents.slice(0, 100), resultCount: incidents.filter(i => i.reportType === 'Polling Unit Result').length } }) }).then(x => setAiSummary(x.analysis)).catch(() => setAiSummary('AI operational analysis unavailable. Check the OpenAI key and Render logs.'))}>AI Operations</button> <button className="icon-btn" onClick={onClose} title="Close results"><FaTimes /></button></div>
+        <button className="icon-btn" onClick={onClose} title="Close results"><FaTimes /></button>
       </header>
-      {newsOpen && <section className="result-table-card" style={{ margin: 18 }}><div className="result-table-title"><div><h2>Latest Ilorin / Kwara election news</h2><p>Live headlines fetched from public RSS feeds.</p></div><div><button className="secondary" onClick={loadNews}>Refresh</button> <button className="primary" disabled={!news.length} onClick={() => request('/news/summary', token, { method: 'POST', body: JSON.stringify({ articles: news }) }).then(x => setAiSummary(x.summary)).catch(() => setAiSummary('AI summary unavailable. Check the OpenAI key and Render logs.'))}>AI Summary</button></div></div>{aiSummary && <p className="news-summary">{aiSummary}</p>}{newsLoading ? <p>Loading news…</p> : <div className="news-list">{news.map(item => <article className="news-item" key={item.url}><a href={item.url} target="_blank" rel="noreferrer"><h3>{item.title}</h3></a><small>{item.source} · {item.publishedAt || 'Recent'}</small></article>)}{!news.length && <p>No headlines returned. Check the server logs for the provider count.</p>}</div>}</section>}
-
-      {/* Tab bar */}
-      <div className="rc-tab-bar">
-        <button className={activeTab === "breakdown" ? "rc-tab active" : "rc-tab"} onClick={() => setActiveTab("breakdown")}>Polling Unit Breakdown</button>
-        <button className={activeTab === "winloss" ? "rc-tab active" : "rc-tab"} onClick={() => setActiveTab("winloss")}>
-          Win / Loss Map {top6.length > 0 && <span className="rc-tab-badge">{top6.length} parties</span>}
-        </button>
-      </div>
-
+      <div className="rc-tab-bar"><button className={view === "breakdown" ? "rc-tab active" : "rc-tab"} onClick={() => setView("breakdown")}>Polling Unit Breakdown</button><button className={view === "winloss" || view === "winloss-lga" ? "rc-tab active" : "rc-tab"} onClick={() => setView("winloss")}>Win / Loss Analysis</button><button className={view === "news" ? "rc-tab active" : "rc-tab"} onClick={() => setView("news")}>Election News</button></div>
       <main className="results-center-body">
-        {activeTab === "breakdown" && (
-          <>
-            <section className="result-total-strip">
-              <article className="result-total-card grand"><span>Polling-unit submissions</span><strong>{reports.length}</strong><small>Multiple updates per unit are allowed</small></article>
-              {summary.partyNames.map(party => <article className="result-total-card" key={party}><span>{party}</span><strong>{summary.totals[party].toLocaleString()}</strong><small>Total uploaded votes</small></article>)}
-            </section>
-            <section className="result-table-card">
-              <div className="result-table-title"><div><h2>Polling-unit breakdown</h2><p>Counts and evidence submitted from the field.</p></div><b>{reports.length} submitted</b></div>
-              <div className="result-table-scroll">
-                <table className="result-progress-table">
-                  <thead><tr><th>LGA</th><th>Ward</th><th>Polling unit</th>{summary.partyNames.map(party => <th key={party}>{party}</th>)}<th>Location</th><th>Evidence</th><th>Uploaded</th></tr></thead>
-                  <tbody>
-                    {summary.rows.map((row) => (
-                      <tr key={row.id}><td>{row.lga || "—"}</td><td>{row.ward || "—"}</td><td><b>{row.pollingUnit || "—"}</b></td>{summary.partyNames.map(party => <td key={party}><strong>{Number(row.results.find(item => item.party === party)?.votes || 0).toLocaleString()}</strong></td>)}<td>{Number(row.lat).toFixed(5)}, {Number(row.lng).toFixed(5)}</td><td><div className="result-evidence">{(row.media || []).filter((item) => item.type === "image").slice(0, 2).map((item, index) => <a href={item.data} target="_blank" rel="noreferrer" key={`${row.id}-${index}`}><img src={item.data} alt={`Evidence for ${row.pollingUnit}`} /></a>)}</div></td><td>{new Date(row.createdAt).toLocaleString()}</td></tr>
-                    ))}
-                    {!summary.rows.length && <tr><td className="result-empty" colSpan={summary.partyNames.length + 7}>No polling-unit results have been uploaded yet.</td></tr>}
-                  </tbody>
-                </table>
-              </div>
-            </section>
-          </>
-        )}
-
-        {activeTab === "winloss" && (
-          <div className="wl-panel">
-            {!top6.length ? (
-              <div className="wl-empty">No results uploaded yet. Win/Loss analysis will appear once polling units submit their counts.</div>
-            ) : (
-              <>
-                {/* Top-6 party chips */}
-                <div className="wl-party-strip">
-                  <span className="wl-strip-label">Top 6 parties by total votes:</span>
-                  {top6.map((party, i) => (
-                    <button
-                      key={party}
-                      className={`wl-party-chip${focusParty === party ? " active" : ""}`}
-                      style={{ "--chip-color": PARTY_COLORS[i] }}
-                      onClick={() => { setFocusParty(party === focusParty ? null : party); setWinLossView("party"); }}
-                      title={`${summary.totals[party]?.toLocaleString()} total votes`}
-                    >
-                      <span className="wl-chip-dot" />
-                      {party}
-                      <span className="wl-chip-votes">{summary.totals[party]?.toLocaleString()}</span>
-                    </button>
-                  ))}
-                  {focusParty && <button className="wl-clear-btn" onClick={() => { setFocusParty(null); setWinLossView("ward"); }}>✕ Clear</button>}
-                </div>
-
-                {/* Sub-view tabs */}
-                <div className="wl-sub-tabs">
-                  <button className={winLossView === "ward" ? "wl-sub-tab active" : "wl-sub-tab"} onClick={() => { setWinLossView("ward"); setFocusParty(null); }}>By Ward</button>
-                  <button className={winLossView === "lga" ? "wl-sub-tab active" : "wl-sub-tab"} onClick={() => { setWinLossView("lga"); setFocusParty(null); }}>By LGA</button>
-                  {focusParty && <button className={winLossView === "party" ? "wl-sub-tab active" : "wl-sub-tab"} onClick={() => setWinLossView("party")}>{focusParty} Detail</button>}
-                </div>
-
-                {/* BY WARD VIEW */}
-                {winLossView === "ward" && (
-                  <section className="result-table-card wl-table-card">
-                    <div className="result-table-title">
-                      <div><h2>Ward-level win / loss</h2><p>The leading party at each ward based on submitted polling unit votes.</p></div>
-                      <b>{winLossSummary.byWard.length} wards</b>
-                    </div>
-                    <div className="result-table-scroll">
-                      <table className="result-progress-table">
-                        <thead>
-                          <tr>
-                            <th>LGA</th><th>Ward</th><th>Units</th><th>Winner</th>
-                            {top6.map(p => <th key={p} style={{ color: partyColor(p) }}>{p}</th>)}
-                          </tr>
-                        </thead>
-                        <tbody>
-                          {winLossSummary.byWard.map(({ lga, ward, votes, winner, units }) => (
-                            <tr key={`${lga}${ward}`}>
-                              <td>{lga}</td>
-                              <td>{ward}</td>
-                              <td>{units}</td>
-                              <td>
-                                {winner
-                                  ? <span className="wl-winner-badge" style={{ background: partyColor(winner) + "22", color: partyColor(winner), border: `1px solid ${partyColor(winner)}66` }}>{winner}</span>
-                                  : <span className="wl-tie">—</span>}
-                              </td>
-                              {top6.map(p => (
-                                <td key={p} className={winner === p ? "wl-win-cell" : winner ? "wl-loss-cell" : ""}>
-                                  <span className="wl-votes">{votes[p]?.toLocaleString() || 0}</span>
-                                  {winner === p && <span className="wl-icon">✓</span>}
-                                  {winner && winner !== p && <span className="wl-icon wl-loss-icon">✗</span>}
-                                </td>
-                              ))}
-                            </tr>
-                          ))}
-                          {!winLossSummary.byWard.length && (
-                            <tr><td className="result-empty" colSpan={top6.length + 4}>No ward-level data available yet.</td></tr>
-                          )}
-                        </tbody>
-                      </table>
-                    </div>
-                  </section>
-                )}
-
-                {/* BY LGA VIEW */}
-                {winLossView === "lga" && (
-                  <section className="result-table-card wl-table-card">
-                    <div className="result-table-title">
-                      <div><h2>LGA-level win / loss</h2><p>The leading party in each Local Government Area.</p></div>
-                      <b>{winLossSummary.byLga.length} LGAs</b>
-                    </div>
-                    <div className="result-table-scroll">
-                      <table className="result-progress-table">
-                        <thead>
-                          <tr>
-                            <th>LGA</th><th>Wards</th><th>Units</th><th>Winner</th>
-                            {top6.map(p => <th key={p} style={{ color: partyColor(p) }}>{p}</th>)}
-                          </tr>
-                        </thead>
-                        <tbody>
-                          {winLossSummary.byLga.map(({ lga, votes, winner, wards, units }) => (
-                            <tr key={lga}>
-                              <td><b>{lga}</b></td>
-                              <td>{wards}</td>
-                              <td>{units}</td>
-                              <td>
-                                {winner
-                                  ? <span className="wl-winner-badge" style={{ background: partyColor(winner) + "22", color: partyColor(winner), border: `1px solid ${partyColor(winner)}66` }}>{winner}</span>
-                                  : <span className="wl-tie">—</span>}
-                              </td>
-                              {top6.map(p => (
-                                <td key={p} className={winner === p ? "wl-win-cell" : winner ? "wl-loss-cell" : ""}>
-                                  <span className="wl-votes">{votes[p]?.toLocaleString() || 0}</span>
-                                  {winner === p && <span className="wl-icon">✓</span>}
-                                  {winner && winner !== p && <span className="wl-icon wl-loss-icon">✗</span>}
-                                </td>
-                              ))}
-                            </tr>
-                          ))}
-                          {!winLossSummary.byLga.length && (
-                            <tr><td className="result-empty" colSpan={top6.length + 4}>No LGA-level data available yet.</td></tr>
-                          )}
-                        </tbody>
-                      </table>
-                    </div>
-                  </section>
-                )}
-
-                {/* PER-PARTY DETAIL VIEW */}
-                {winLossView === "party" && focusParty && partyBreakdown && (
-                  <div className="wl-party-detail">
-                    <div className="wl-party-detail-header" style={{ borderColor: partyColor(focusParty) }}>
-                      <h2 style={{ color: partyColor(focusParty) }}>{focusParty}</h2>
-                      <div className="wl-party-detail-stats">
-                        <span className="wl-stat-win">✓ Winning {partyBreakdown.winningWards.length} ward{partyBreakdown.winningWards.length !== 1 ? "s" : ""}</span>
-                        <span className="wl-stat-loss">✗ Losing {partyBreakdown.losingWards.length} ward{partyBreakdown.losingWards.length !== 1 ? "s" : ""}</span>
-                        <span className="wl-stat-win">✓ Winning {partyBreakdown.winningLgas.length} LGA{partyBreakdown.winningLgas.length !== 1 ? "s" : ""}</span>
-                        <span className="wl-stat-loss">✗ Losing {partyBreakdown.losingLgas.length} LGA{partyBreakdown.losingLgas.length !== 1 ? "s" : ""}</span>
-                      </div>
-                    </div>
-
-                    <div className="wl-detail-cols">
-                      {/* LGA summary */}
-                      <div className="wl-detail-col">
-                        <div className="wl-detail-col-head wl-win-head">✓ LGAs Won ({partyBreakdown.winningLgas.length})</div>
-                        {partyBreakdown.winningLgas.length ? (
-                          <table className="result-progress-table wl-mini-table">
-                            <thead><tr><th>LGA</th><th>Votes</th><th>Lead</th></tr></thead>
-                            <tbody>
-                              {partyBreakdown.winningLgas.map(({ lga, votes }) => {
-                                const secondBest = Math.max(...top6.filter(p => p !== focusParty).map(p => votes[p] || 0));
-                                const lead = (votes[focusParty] || 0) - secondBest;
-                                return (
-                                  <tr key={lga} className="wl-win-row">
-                                    <td><b>{lga}</b></td>
-                                    <td>{(votes[focusParty] || 0).toLocaleString()}</td>
-                                    <td className="wl-lead">+{lead.toLocaleString()}</td>
-                                  </tr>
-                                );
-                              })}
-                            </tbody>
-                          </table>
-                        ) : <div className="wl-none">No LGAs won yet.</div>}
-
-                        <div className="wl-detail-col-head wl-loss-head" style={{ marginTop: 18 }}>✗ LGAs Lost ({partyBreakdown.losingLgas.length})</div>
-                        {partyBreakdown.losingLgas.length ? (
-                          <table className="result-progress-table wl-mini-table">
-                            <thead><tr><th>LGA</th><th>Votes</th><th>Leader</th><th>Gap</th></tr></thead>
-                            <tbody>
-                              {partyBreakdown.losingLgas.map(({ lga, votes, winner }) => {
-                                const gap = (votes[winner] || 0) - (votes[focusParty] || 0);
-                                return (
-                                  <tr key={lga} className="wl-loss-row">
-                                    <td><b>{lga}</b></td>
-                                    <td>{(votes[focusParty] || 0).toLocaleString()}</td>
-                                    <td><span className="wl-winner-badge" style={{ background: partyColor(winner) + "22", color: partyColor(winner), border: `1px solid ${partyColor(winner)}44` }}>{winner}</span></td>
-                                    <td className="wl-gap">-{gap.toLocaleString()}</td>
-                                  </tr>
-                                );
-                              })}
-                            </tbody>
-                          </table>
-                        ) : <div className="wl-none">Not losing any LGAs.</div>}
-                      </div>
-
-                      {/* Ward summary */}
-                      <div className="wl-detail-col">
-                        <div className="wl-detail-col-head wl-win-head">✓ Wards Won ({partyBreakdown.winningWards.length})</div>
-                        {partyBreakdown.winningWards.length ? (
-                          <table className="result-progress-table wl-mini-table">
-                            <thead><tr><th>LGA</th><th>Ward</th><th>Votes</th><th>Lead</th></tr></thead>
-                            <tbody>
-                              {partyBreakdown.winningWards.map(({ lga, ward, votes }) => {
-                                const secondBest = Math.max(...top6.filter(p => p !== focusParty).map(p => votes[p] || 0));
-                                const lead = (votes[focusParty] || 0) - secondBest;
-                                return (
-                                  <tr key={`${lga}${ward}`} className="wl-win-row">
-                                    <td>{lga}</td>
-                                    <td><b>{ward}</b></td>
-                                    <td>{(votes[focusParty] || 0).toLocaleString()}</td>
-                                    <td className="wl-lead">+{lead.toLocaleString()}</td>
-                                  </tr>
-                                );
-                              })}
-                            </tbody>
-                          </table>
-                        ) : <div className="wl-none">No wards won yet.</div>}
-
-                        <div className="wl-detail-col-head wl-loss-head" style={{ marginTop: 18 }}>✗ Wards Lost ({partyBreakdown.losingWards.length})</div>
-                        {partyBreakdown.losingWards.length ? (
-                          <table className="result-progress-table wl-mini-table">
-                            <thead><tr><th>LGA</th><th>Ward</th><th>Votes</th><th>Leader</th><th>Gap</th></tr></thead>
-                            <tbody>
-                              {partyBreakdown.losingWards.map(({ lga, ward, votes, winner }) => {
-                                const gap = (votes[winner] || 0) - (votes[focusParty] || 0);
-                                return (
-                                  <tr key={`${lga}${ward}`} className="wl-loss-row">
-                                    <td>{lga}</td>
-                                    <td><b>{ward}</b></td>
-                                    <td>{(votes[focusParty] || 0).toLocaleString()}</td>
-                                    <td><span className="wl-winner-badge" style={{ background: partyColor(winner) + "22", color: partyColor(winner), border: `1px solid ${partyColor(winner)}44` }}>{winner}</span></td>
-                                    <td className="wl-gap">-{gap.toLocaleString()}</td>
-                                  </tr>
-                                );
-                              })}
-                            </tbody>
-                          </table>
-                        ) : <div className="wl-none">Not losing any wards.</div>}
-                      </div>
-                    </div>
-                  </div>
-                )}
-              </>
-            )}
+        {view !== "breakdown" && view !== "news" && <section className="result-total-strip"><article className="result-total-card grand"><span>Current projection</span><strong>{forecast.leader || "—"}</strong><small>{forecast.confidence}% indicative confidence; not a final result</small></article><article className="result-total-card"><span>Vote margin</span><strong>{forecast.margin.toLocaleString()}</strong><small>Against second place</small></article><article className="result-total-card"><span>Units covered</span><strong>{forecast.coverage.toLocaleString()}</strong><small>Unique submitted units</small></article></section>}
+        {view === "news" && <section className="result-table-card"><div className="result-table-title"><div><h2>Kwara State News</h2><p>General Kwara State coverage, including politics, INEC, elections, parties, governance, security, and major local developments.</p></div><div className="analysis-actions news-actions"><button className="primary action-btn refresh-news-btn" onClick={() => { setNews([]); setNewsSummary(""); setNewsSummaryError(""); setView("news"); }}><FaSyncAlt /> <span>Refresh</span></button><button className="secondary action-btn ai-action-btn" disabled={!news.length || newsSummaryLoading} onClick={() => { setNewsSummaryLoading(true); setNewsSummaryError(""); request("/news/summary", authToken, { method: "POST", body: JSON.stringify({ articles: news }) }).then((x) => { setNewsSummary(x.summary || "No summary available yet."); if (x.provider === "local") setNewsSummaryError("AI was unavailable, so a local fallback summary was generated."); else setNewsSummaryError(""); }).catch((error) => { setNewsSummary(""); setNewsSummaryError(error.message || "The AI summary request failed."); }).finally(() => setNewsSummaryLoading(false)); }}><MdFlashOn /> <span>{newsSummaryLoading ? "Working…" : "AI Summary"}</span></button></div></div>{newsSummary && <div className="news-summary">{cleanAiText(newsSummary)}</div>}{newsSummaryError && <p className="muted">{newsSummaryError}</p>}{newsLoading ? <p>Loading current headlines…</p> : <div className="news-list">{news.map(item => <article className="news-item" key={item.url}><a href={item.url} target="_blank" rel="noreferrer"><h3>{item.title}</h3></a><small>{item.source} · {item.publishedAt ? new Date(item.publishedAt).toLocaleString() : "Recent"}</small></article>)}{!news.length && <p>No current Kwara State headlines available.</p>}</div>}</section>}
+        {view !== "breakdown" && view !== "news" && <section className="result-table-card" style={{ marginBottom: 16 }}><div className="result-table-title"><div><h2>Party performance & operational outlook</h2><p>Neutral analysis based only on submitted results and operational reports.</p></div><div className="analysis-actions"><label className="party-focus-field"><span>Party focus</span><select value={focusParty} onChange={e => setFocusParty(e.target.value)} aria-label="Select party for operational analysis"><option value="">All parties</option>{summary.partyNames.map(p => <option key={p} value={p}>{p}</option>)}</select></label><button className="primary action-btn ai-action-btn" disabled={aiOutlookLoading} onClick={() => { const safeIncidents = incidents.slice(0, 100).map(item => ({ id: item.id, title: item.title, description: String(item.description || "").slice(0, 500), reportType: item.reportType, severity: item.severity, status: item.status, lga: item.lga, ward: item.ward, pollingUnit: item.pollingUnit, createdAt: item.createdAt })); setAiOutlookLoading(true); request("/analysis/ai", authToken, { method: "POST", body: JSON.stringify({ context: { projection: forecast, selectedParty: focusParty, partyAnalysis, incidents: safeIncidents, actions } }) }).then(x => setAiOutlook(x.analysis || "No AI analysis returned.")).catch(e => setAiOutlook(e.message || "AI analysis unavailable.")).finally(() => setAiOutlookLoading(false)); }}><MdFlashOn /> <span>{aiOutlookLoading ? "Analyzing…" : "AI Operational Analysis"}</span></button></div></div>{partyAnalysis && <p>{focusParty}: <b>{partyAnalysis.votes.toLocaleString()}</b> votes, leading in <b>{partyAnalysis.wards}</b> wards and <b>{partyAnalysis.lgas}</b> LGAs. Related incident mentions: <b>{partyAnalysis.incidents}</b>.</p>}{aiOutlook && <div className="news-summary">{cleanAiText(aiOutlook)}</div>}<ul>{actions.map(action => <li key={action}>{action}</li>)}</ul></section>}
+        {partyAnalysis && view !== "breakdown" && view !== "news" && <section className="party-lga-analysis"><div className="party-lga-summary"><div><span>Selected party</span><strong>{focusParty}</strong></div><div className="winning"><span>LGAs winning</span><strong>{partyAnalysis.winningLgas.length}</strong></div><div className="losing"><span>LGAs losing</span><strong>{partyAnalysis.losingLgas.length}</strong></div><div><span>Total votes</span><strong>{partyAnalysis.votes.toLocaleString()}</strong></div></div><div className="party-lga-columns"><section className="party-lga-column winning"><header><div><span className="performance-dot" />Winning LGAs</div><b>{partyAnalysis.winningLgas.length}</b></header><div className="party-lga-list">{partyAnalysis.winningLgas.map(item => <article key={item.name}><div><strong>{item.name}</strong><small>Ahead of {item.opponent}</small></div><div><b>+{item.margin.toLocaleString()}</b><small>{item.votes.toLocaleString()} votes</small></div></article>)}{!partyAnalysis.winningLgas.length && <p>No confirmed LGA lead for {focusParty} yet.</p>}</div></section><section className="party-lga-column losing"><header><div><span className="performance-dot" />Losing LGAs</div><b>{partyAnalysis.losingLgas.length}</b></header><div className="party-lga-list">{partyAnalysis.losingLgas.map(item => <article key={item.name}><div><strong>{item.name}</strong><small>Behind {item.opponent}</small></div><div><b>-{item.margin.toLocaleString()}</b><small>{item.votes.toLocaleString()} votes</small></div></article>)}{!partyAnalysis.losingLgas.length && <p>No confirmed LGA loss for {focusParty} yet.</p>}</div></section></div>{partyAnalysis.tiedLgas.length > 0 && <p className="party-tied-note">Tied in: {partyAnalysis.tiedLgas.join(", ")}.</p>}<p className="party-analysis-note">Leading in {partyAnalysis.wards} wards. Related incident mentions: {partyAnalysis.incidents}. Based only on submitted polling-unit results.</p></section>}
+        {view === "winloss" && <section className="result-table-card"><div className="result-table-title"><div><h2>Win / Loss Analysis</h2><p>Leading party by ward and LGA from submitted polling-unit results.</p></div><b>Top {top6.length} parties</b></div><div className="wl-sub-tabs"><button className="wl-sub-tab active">By Ward</button><button className="wl-sub-tab" onClick={() => setView("winloss-lga")}>By LGA</button></div><div className="result-table-scroll"><table className="result-progress-table"><thead><tr><th>Ward</th><th>Winner</th>{top6.map(p => <th key={p}>{p}</th>)}</tr></thead><tbody>{winLoss.wards.map(g => <tr key={g.label}><td>{g.label}</td><td><b>{g.winner || "—"}</b></td>{top6.map(p => <td key={p}>{g.votes[p].toLocaleString()} {g.winner === p ? "✓" : g.winner ? "✕" : ""}</td>)}</tr>)}{!winLoss.wards.length && <tr><td colSpan={top6.length + 2} className="result-empty">No ward-level data available yet.</td></tr>}</tbody></table></div></section>}
+        {view === "winloss-lga" && <section className="result-table-card"><div className="result-table-title"><div><h2>LGA Win / Loss Analysis</h2><p>Leading party in each Local Government Area.</p></div></div><div className="wl-sub-tabs"><button className="wl-sub-tab" onClick={() => setView("winloss")}>By Ward</button><button className="wl-sub-tab active">By LGA</button></div><div className="result-table-scroll"><table className="result-progress-table"><thead><tr><th>LGA</th><th>Winner</th>{top6.map(p => <th key={p}>{p}</th>)}</tr></thead><tbody>{winLoss.lgas.map(g => <tr key={g.label}><td><b>{g.label}</b></td><td><b>{g.winner || "—"}</b></td>{top6.map(p => <td key={p}>{g.votes[p].toLocaleString()} {g.winner === p ? "✓" : g.winner ? "✕" : ""}</td>)}</tr>)}</tbody></table></div></section>}
+        {view !== "breakdown" && <div className="result-table-card" style={{marginTop: 16}}><p className="muted">Select a party in the table to compare its wins and losses. Results update automatically as new submissions arrive.</p></div>}
+        {view !== "breakdown" ? null : <>
+        <section className="result-total-strip">
+          <article className="result-total-card grand"><span>Polling-unit submissions</span><strong>{reports.length}</strong><small>Multiple updates per unit are allowed</small></article>{summary.partyNames.map(party => <article className="result-total-card" key={party}><span>{party}</span><strong>{summary.totals[party].toLocaleString()}</strong><small>Total uploaded votes</small></article>)}
+        </section>
+        <section className="result-table-card">
+          <div className="result-table-title"><div><h2>Polling-unit breakdown</h2><p>Counts and evidence submitted from the field.</p></div><b>{reports.length} submitted</b></div>
+          <div className="result-table-scroll">
+            <table className="result-progress-table">
+              <thead><tr><th>LGA</th><th>Ward</th><th>Polling unit</th>{summary.partyNames.map(party => <th key={party}>{party}</th>)}<th>Location</th><th>Evidence</th><th>Uploaded</th></tr></thead>
+              <tbody>
+                {summary.rows.map((row) => (
+                  <tr key={row.id}><td>{row.lga || "—"}</td><td>{row.ward || "—"}</td><td><b>{row.pollingUnit || "—"}</b></td>{summary.partyNames.map(party => <td key={party}><strong>{Number(row.results.find(item => item.party === party)?.votes || 0).toLocaleString()}</strong></td>)}<td>{Number(row.lat).toFixed(5)}, {Number(row.lng).toFixed(5)}</td><td><div className="result-evidence">{(row.media || []).filter((item) => item.type === "image").slice(0, 2).map((item, index) => <a href={item.data} target="_blank" rel="noreferrer" key={`${row.id}-${index}`}><img src={item.data} alt={`Evidence for ${row.pollingUnit}`} /></a>)}</div></td><td>{new Date(row.createdAt).toLocaleString()}</td></tr>
+                ))}
+                {!summary.rows.length && <tr><td className="result-empty" colSpan={summary.partyNames.length + 7}>No polling-unit results have been uploaded yet.</td></tr>}
+              </tbody>
+            </table>
           </div>
-        )}
+        </section>
+        </>}
       </main>
     </div>
   );
@@ -5096,6 +4934,7 @@ function Dashboard({ session, onLogout, onSessionUpdate }) {
   const [mapDataPanel, setMapDataPanel] = useState(false);
   const [analyticsOpen, setAnalyticsOpen] = useState(false);
   const [resultsOpen, setResultsOpen] = useState(false);
+  const [partyMapAnalysis, setPartyMapAnalysis] = useState(null);
   const [analysisLayers, setAnalysisLayers] = useState([]);
   const [pendingAreaAction, setPendingAreaAction] = useState(null);
   const [areaSearchResult, setAreaSearchResult] = useState(null);
@@ -5107,6 +4946,7 @@ function Dashboard({ session, onLogout, onSessionUpdate }) {
   const [showBoundaryLayer, setShowBoundaryLayer] = useState(true);
   const [showStateBorders, setShowStateBorders] = useState(true);
   const [showLgaBorders, setShowLgaBorders] = useState(true);
+  const [showBoundaryNames, setShowBoundaryNames] = useState(true);
   const [selectedBoundaryState, setSelectedBoundaryState] = useState("");
   const [selectedBoundaryLabel, setSelectedBoundaryLabel] = useState("");
   const [drawMode, setDrawMode] = useState("");
@@ -5776,7 +5616,7 @@ function Dashboard({ session, onLogout, onSessionUpdate }) {
     const queries = [
       search,
       `${search}, Nigeria`,
-      `${search}, Oyo State, Nigeria`,
+      `${search}, Kwara State, Nigeria`,
     ];
     for (const q of queries) {
       const data = await fetch(
@@ -5809,7 +5649,7 @@ function Dashboard({ session, onLogout, onSessionUpdate }) {
     if (coordMatch) {
       return { lat: Number(coordMatch[1]), lng: Number(coordMatch[2]), label: text };
     }
-    const queries = [text, `${text}, Nigeria`, `${text}, Oyo State, Nigeria`];
+    const queries = [text, `${text}, Nigeria`, `${text}, Kwara State, Nigeria`];
     for (const q of queries) {
       const data = await fetch(
         `https://nominatim.openstreetmap.org/search?format=json&limit=1&addressdetails=1&q=${encodeURIComponent(q)}`,
@@ -7532,11 +7372,9 @@ function Dashboard({ session, onLogout, onSessionUpdate }) {
                     )}
                   </div>
                 )}
-                {canAdmin && (
-                  <button onClick={() => setResultsOpen(true)}>
-                    <FaChartBar /> Results
-                  </button>
-                )}
+                <button onClick={() => setResultsOpen(true)}>
+                  <FaChartBar /> Results & Forecast
+                </button>
                 {canAdmin && (
                   <button onClick={() => setPartyManagerOpen(true)}>
                     <FaUserCog /> Political Parties
@@ -7828,15 +7666,13 @@ function Dashboard({ session, onLogout, onSessionUpdate }) {
             >
               <FaVideo />
             </button>
-            {canAdmin && (
-              <button
-                className="map-action result-center-open"
-                onClick={() => setResultsOpen(true)}
-                title="Election results"
-              >
-                Results
-              </button>
-            )}
+            <button
+              className="map-action result-center-open"
+              onClick={() => setResultsOpen(true)}
+              title="Election results and forecast"
+            >
+              Results & Forecast
+            </button>
             {canAdmin && (
               <button
                 className="map-action report-action"
@@ -7906,6 +7742,10 @@ function Dashboard({ session, onLogout, onSessionUpdate }) {
             </div>
           </div>
         </div>
+        {!isAgent && <div className="boundary-display-controls" aria-label="Map boundary display">
+          <button type="button" className={showStateBorders || showLgaBorders ? "active" : ""} aria-pressed={showStateBorders || showLgaBorders} title={showStateBorders || showLgaBorders ? "Hide Kwara State and LGA borders" : "Show Kwara State and LGA borders"} onClick={() => { const next = !(showStateBorders || showLgaBorders); setShowStateBorders(next); setShowLgaBorders(next); }}><span>Border</span><i /></button>
+          <button type="button" className={showBoundaryNames ? "active" : ""} aria-pressed={showBoundaryNames} disabled={!showStateBorders && !showLgaBorders} title={showBoundaryNames ? "Hide boundary names" : "Show boundary names"} onClick={() => setShowBoundaryNames(value => !value)}><span>Names</span><i /></button>
+        </div>}
         {isAgent && <div className="agent-field-screen">
           <span className="logo-wrap logo-wrap--agent">
             <img src="/pdp-logo.png" alt="E Monitoring Kwara logo" />
@@ -7970,6 +7810,8 @@ function Dashboard({ session, onLogout, onSessionUpdate }) {
           showBoundaryLayer={showBoundaryLayer}
           showStateBorders={showStateBorders}
           showLgaBorders={showLgaBorders}
+          showBoundaryNames={showBoundaryNames}
+          partyMapAnalysis={partyMapAnalysis}
           selectedBoundaryState={selectedBoundaryState}
           onBoundarySelect={(id, label) => {
             setSelectedBoundaryState(id);
@@ -8283,7 +8125,7 @@ function Dashboard({ session, onLogout, onSessionUpdate }) {
           )}
         </section>
       )}
-      {resultsOpen && canAdmin && <ResultsCenter incidents={incidents} token={session.token} onClose={() => setResultsOpen(false)} />}
+      {resultsOpen && <ResultsCenter incidents={incidents} parties={parties} onClose={() => setResultsOpen(false)} authToken={session.token} initialFocusParty={partyMapAnalysis?.party || ""} onPartyMapChange={setPartyMapAnalysis} />}
       {analyticsOpen && canAdmin && (
         <AnalyticsPanel
           incidents={incidents}
@@ -8513,12 +8355,13 @@ export default function App() {
   });
   const login = (value, rememberMe = true) => {
     const sessionValue = JSON.stringify(value);
-    // Keep authorized sessions across reloads. Logout explicitly clears it.
+    // Keep the authenticated session across reloads; explicit logout clears it.
     localStorage.setItem("command-session", sessionValue);
     sessionStorage.removeItem("command-session");
     setSession(value);
   };
   const logout = () => {
+    fetch(`${API}/auth/logout`, { method: "POST", credentials: "same-origin" }).catch(() => {});
     localStorage.removeItem("command-session");
     sessionStorage.removeItem("command-session");
     setSession(null);
