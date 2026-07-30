@@ -5239,9 +5239,18 @@ function Dashboard({ session, onLogout, onSessionUpdate }) {
     };
     socket.on("connect", registerCameraUser);
     if (socket.connected) registerCameraUser();
-    const makePeer = (key, remoteUserId) => {
+    const fallbackIceServers = [{ urls: "stun:stun.l.google.com:19302" }];
+    const iceServersPromise = request("/turn/credentials", session.token)
+      .then((result) =>
+        Array.isArray(result?.iceServers) && result.iceServers.length
+          ? result.iceServers
+          : fallbackIceServers,
+      )
+      .catch(() => fallbackIceServers);
+    const makePeer = async (key, remoteUserId) => {
+      const iceServers = await iceServersPromise;
       const pc = new RTCPeerConnection({
-        iceServers: [{ urls: "stun:stun.l.google.com:19302" }],
+        iceServers,
       });
       const connectionTimer = setTimeout(() => {
         if (pc.connectionState !== "connected" && localCameraStreamRef.current)
@@ -5414,7 +5423,7 @@ function Dashboard({ session, onLogout, onSessionUpdate }) {
     socket.on("camera:viewer:request", async ({ viewerSocketId }) => {
       const stream = localCameraStreamRef.current;
       if (!stream) return;
-      const pc = makePeer(viewerSocketId);
+      const pc = await makePeer(viewerSocketId);
       stream.getTracks().forEach((track) => pc.addTrack(track, stream));
       const offer = await pc.createOffer();
       await pc.setLocalDescription(offer);
@@ -5426,7 +5435,7 @@ function Dashboard({ session, onLogout, onSessionUpdate }) {
     socket.on("camera:signal", async ({ from, fromUserId, data }) => {
       let pc = rtcPeersRef.current[from];
       if (data.sdp?.type === "offer") {
-        pc ||= makePeer(from, fromUserId);
+        pc ||= await makePeer(from, fromUserId);
         await pc.setRemoteDescription(data.sdp);
         const answer = await pc.createAnswer();
         await pc.setLocalDescription(answer);
