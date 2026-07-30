@@ -32,7 +32,16 @@ if (process.env.NODE_ENV === 'production') {
   const missing = ['JWT_SECRET', 'SUPER_ADMIN_PASSWORD', 'ADMIN_PASSWORD'].filter(name => !process.env[name]);
   if (missing.length) throw new Error(`Missing required production configuration: ${missing.join(', ')}`);
   if (Buffer.byteLength(process.env.JWT_SECRET, 'utf8') < 32) throw new Error('JWT_SECRET must contain at least 32 bytes');
-  if (!validatePassword(process.env.SUPER_ADMIN_PASSWORD) || !validatePassword(process.env.ADMIN_PASSWORD)) throw new Error('Seed administrator passwords do not meet the password policy');
+  const weakSeedPasswords = [
+    !validatePassword(process.env.SUPER_ADMIN_PASSWORD) && 'SUPER_ADMIN_PASSWORD',
+    !validatePassword(process.env.ADMIN_PASSWORD) && 'ADMIN_PASSWORD',
+  ].filter(Boolean);
+  if (weakSeedPasswords.length) {
+    console.warn(
+      `Production is using legacy administrator credentials that do not meet the current password policy: ${weakSeedPasswords.join(', ')}. ` +
+      'The service will start so existing deployments remain available; rotate these secrets to passwords with at least 12 characters, uppercase, lowercase, a number, and a symbol.',
+    );
+  }
 }
 const seed = {
   users: [
