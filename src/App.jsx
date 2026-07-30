@@ -474,7 +474,7 @@ const playEmergencyRing = (alert = {}) => {
           tag: alert.id || "election-monitor-emergency",
           renotify: true,
           requireInteraction: true,
-          icon: "/icons/icon-192.png",
+          icon: "/pdp-logo.png",
         }),
       )
       .catch(() => new Notification(title, { body, requireInteraction: true }));
