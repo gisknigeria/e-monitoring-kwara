@@ -128,8 +128,8 @@ body{background:var(--wine-950)}
 .login-brand{max-width:720px}
 .campaign-logo{display:block;width:min(430px,78%);max-height:210px;object-fit:contain;object-position:left center;margin:0 0 42px;filter:drop-shadow(0 15px 28px #02130a80)}
 /* Bare logo — no gradient wrapper, just the circular party logo */
-.campaign-logo-bare{display:block;width:min(160px,38%);height:auto;object-fit:contain;margin:0 0 42px;border-radius:50%;box-shadow:0 8px 32px #02130a80}
-.login-card-logo-bare{display:none;width:100px;height:100px;object-fit:contain;margin:0 auto 24px;border-radius:50%;box-shadow:0 6px 20px #02130a80}
+.campaign-logo-bare{display:block;width:min(118px,30%);height:auto;object-fit:contain;margin:0 0 32px;border-radius:50%;filter:drop-shadow(0 10px 24px #02130a80)}
+.login-card-logo-bare{display:none;width:92px;height:92px;object-fit:contain;margin:0 auto 24px;border-radius:50%;filter:drop-shadow(0 7px 18px #02130a80)}
 .command-kicker{margin:0 0 15px!important;color:var(--gold-400)!important;font-size:11px!important;letter-spacing:.22em;text-transform:uppercase}
 .command-title{max-width:720px;margin:0!important;color:var(--cream)!important;font-size:clamp(40px,5vw,76px)!important;line-height:.98!important;letter-spacing:-.045em!important;font-weight:800!important;text-wrap:balance}
 .command-copy{max-width:620px;margin:28px 0 0;color:#eadde1!important;font-size:clamp(16px,1.35vw,20px)!important;line-height:1.65!important;font-weight:450!important}
@@ -165,7 +165,7 @@ header,.app-topbar,.sidebar-brand{background:#0d2315f2!important;border-color:va
 aside,.command-sidebar{background:linear-gradient(180deg,#12351d,#21060f)!important;border-color:var(--wine-border)!important}
 .sidebar-brand{border-bottom:1px solid var(--wine-border)!important}
 .brand-small{gap:11px!important}
-.sidebar-logo{width:56px;height:38px;object-fit:contain;filter:drop-shadow(0 4px 8px #0008)}
+.sidebar-logo{width:58px;height:58px;flex:0 0 58px;object-fit:cover;border-radius:50%;filter:drop-shadow(0 5px 10px #0008)}
 .brand-small b{color:var(--cream)!important;letter-spacing:.03em!important}
 .brand-small span{color:var(--gold-400)!important}
 .sidebar-user>span,.user>span,.manage-row .avatar{background:#166534!important;color:var(--gold-300)!important;border:1px solid #4ade80!important}

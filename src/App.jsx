@@ -753,12 +753,8 @@ function Login({ onLogin }) {
         <p className="command-kicker">Election Intelligence Platform</p>
         <h1 className="command-title">Election Monitoring Command Center</h1>
         <p className="command-copy">
-          Real-time monitoring, coordinated field operations and location-based election intelligence for Kwara State.
+          Real-time monitoring, coordinated field operations and location-based election intelligence.
         </p>
-        <div className="security-line">
-          <MdLocationPin style={{ verticalAlign: "-2px" }} />{" "}
-          Live field network • Kwara State
-        </div>
       </section>
       <form className="login-card" onSubmit={submit}>
         <img className="login-card-logo-bare" src="/pdp-logo.png" alt="Peoples Democratic Party logo" />
@@ -7113,11 +7109,9 @@ function Dashboard({ session, onLogout, onSessionUpdate }) {
         >
           <div className="sidebar-brand">
             <div className="brand-small">
-              <span className="logo-wrap logo-wrap--sidebar">
-                <img className="sidebar-logo" src="/pdp-logo.png" alt="Peoples Democratic Party logo" />
-              </span>
+              <img className="sidebar-logo" src="/pdp-logo.png" alt="Peoples Democratic Party logo" />
               <div>
-                <b>E Monitoring</b>
+                <b>Election Monitoring</b>
                 <span>Command Center • Kwara</span>
               </div>
             </div>
@@ -7784,9 +7778,7 @@ function Dashboard({ session, onLogout, onSessionUpdate }) {
           </div>
         </div>
         {isAgent && <div className="agent-field-screen">
-          <span className="logo-wrap logo-wrap--agent">
-            <img src="/pdp-logo.png" alt="Peoples Democratic Party logo" />
-          </span>
+          <img className="agent-brand-logo" src="/pdp-logo.png" alt="Peoples Democratic Party logo" />
           <span className="eyebrow">FIELD REPORTING</span>
           <h1>{session.user.pollingUnit || "Polling unit agent"}</h1>
           <p>{[session.user.lga, session.user.ward].filter(Boolean).join(" • ")}</p>
