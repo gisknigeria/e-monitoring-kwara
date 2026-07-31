@@ -1,5 +1,5 @@
-const CACHE_NAME = 'election-monitor-command-v6-pdp-logo';
-const APP_SHELL = ['/', '/manifest.webmanifest', '/pdp-logo.png'];
+const CACHE_NAME = 'election-monitor-command-v7-official-pdp-logo';
+const APP_SHELL = ['/', '/manifest.webmanifest', '/pdp-logo.png', '/icons/icon-192.png', '/icons/icon-512.png', '/icons/maskable-192.png', '/icons/maskable-512.png', '/icons/apple-touch-icon.png', '/icons/favicon-32.png'];
 
 self.addEventListener('install', event => {
   event.waitUntil(caches.open(CACHE_NAME).then(cache => cache.addAll(APP_SHELL)).then(() => self.skipWaiting()));
@@ -21,8 +21,8 @@ self.addEventListener('message', event => {
       tag: alert.id || 'election-monitor-emergency',
       renotify: true,
       requireInteraction: true,
-      icon: '/pdp-logo.png',
-      badge: '/pdp-logo.png',
+      icon: '/icons/icon-192.png',
+      badge: '/icons/icon-192.png',
       data: { url: '/', alert }
     }));
     return;

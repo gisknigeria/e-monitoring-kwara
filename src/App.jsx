@@ -749,7 +749,7 @@ function Login({ onLogin }) {
   return (
     <main className="login-shell">
       <section className="login-brand">
-        <img className="campaign-logo-bare" src="/pdp-logo.png" alt="E Monitoring Kwara logo" />
+        <img className="campaign-logo-bare" src="/pdp-logo.png" alt="Peoples Democratic Party logo" />
         <p className="command-kicker">Election Intelligence Platform</p>
         <h1 className="command-title">Election Monitoring Command Center</h1>
         <p className="command-copy">
@@ -761,7 +761,7 @@ function Login({ onLogin }) {
         </div>
       </section>
       <form className="login-card" onSubmit={submit}>
-        <img className="login-card-logo-bare" src="/pdp-logo.png" alt="E Monitoring Kwara logo" />
+        <img className="login-card-logo-bare" src="/pdp-logo.png" alt="Peoples Democratic Party logo" />
         <div className="eyebrow">SECURE ACCESS</div>
         <h2>Welcome back</h2>
         <p className="muted">Sign in with your authorized election operations credentials.</p>
@@ -7114,7 +7114,7 @@ function Dashboard({ session, onLogout, onSessionUpdate }) {
           <div className="sidebar-brand">
             <div className="brand-small">
               <span className="logo-wrap logo-wrap--sidebar">
-                <img className="sidebar-logo" src="/pdp-logo.png" alt="E Monitoring Kwara logo" />
+                <img className="sidebar-logo" src="/pdp-logo.png" alt="Peoples Democratic Party logo" />
               </span>
               <div>
                 <b>E Monitoring</b>
@@ -7570,6 +7570,29 @@ function Dashboard({ session, onLogout, onSessionUpdate }) {
                 >
                    SOS <span>{showSosIncidents ? "Hide" : "Show"}</span>
                 </button>
+                <button
+                  className={(showStateBorders || showLgaBorders) ? "active" : ""}
+                  onClick={() => {
+                    const next = !(showStateBorders || showLgaBorders);
+                    setShowStateBorders(next);
+                    setShowLgaBorders(next);
+                    setMapMenu("");
+                  }}
+                >
+                  Borders <span>{showStateBorders || showLgaBorders ? "Hide" : "Show"}</span>
+                </button>
+                <button
+                  className={showBoundaryNames ? "active" : ""}
+                  disabled={!showStateBorders && !showLgaBorders}
+                  onClick={() => {
+                    setShowBoundaryNames(value => !value);
+                    setMapMenu("");
+                  }}
+                  title={showBoundaryNames ? "Hide boundary labels" : "Show boundary labels"}
+                >
+                  <span>Labels</span>
+                  <span>{showBoundaryNames ? "Hide" : "Show"}</span>
+                </button>
               </div>
             </div>}
             {!isAgent && <div className={`map-home-menu incident-menu ${mapMenu === "incident" ? "open" : ""}`}>
@@ -7760,13 +7783,9 @@ function Dashboard({ session, onLogout, onSessionUpdate }) {
             </div>
           </div>
         </div>
-        {!isAgent && <div className="boundary-display-controls" aria-label="Map boundary display">
-          <button type="button" className={showStateBorders || showLgaBorders ? "active" : ""} aria-pressed={showStateBorders || showLgaBorders} title={showStateBorders || showLgaBorders ? "Hide Kwara State and LGA borders" : "Show Kwara State and LGA borders"} onClick={() => { const next = !(showStateBorders || showLgaBorders); setShowStateBorders(next); setShowLgaBorders(next); }}><span>Border</span><i /></button>
-          <button type="button" className={showBoundaryNames ? "active" : ""} aria-pressed={showBoundaryNames} disabled={!showStateBorders && !showLgaBorders} title={showBoundaryNames ? "Hide boundary names" : "Show boundary names"} onClick={() => setShowBoundaryNames(value => !value)}><span>Names</span><i /></button>
-        </div>}
         {isAgent && <div className="agent-field-screen">
           <span className="logo-wrap logo-wrap--agent">
-            <img src="/pdp-logo.png" alt="E Monitoring Kwara logo" />
+            <img src="/pdp-logo.png" alt="Peoples Democratic Party logo" />
           </span>
           <span className="eyebrow">FIELD REPORTING</span>
           <h1>{session.user.pollingUnit || "Polling unit agent"}</h1>
