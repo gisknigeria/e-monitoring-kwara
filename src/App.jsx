@@ -749,11 +749,9 @@ function Login({ onLogin }) {
   return (
     <main className="login-shell">
       <section className="login-brand">
-        <span className="logo-wrap logo-wrap--hero">
-          <img className="campaign-logo" src="/pdp-logo.png" alt="E Monitoring Kwara logo" />
-        </span>
-        <p className="command-kicker">Election intelligence platform</p>
-        <h1 className="command-title">E Monitoring Kwara</h1>
+        <img className="campaign-logo-bare" src="/pdp-logo.png" alt="E Monitoring Kwara logo" />
+        <p className="command-kicker">Election Intelligence Platform</p>
+        <h1 className="command-title">Election Monitoring Command Center</h1>
         <p className="command-copy">
           Real-time monitoring, coordinated field operations and location-based election intelligence for Kwara State.
         </p>
@@ -763,10 +761,8 @@ function Login({ onLogin }) {
         </div>
       </section>
       <form className="login-card" onSubmit={submit}>
-        <span className="logo-wrap logo-wrap--card">
-          <img className="login-card-logo" src="/pdp-logo.png" alt="E Monitoring Kwara logo" />
-        </span>
-        <div className="eyebrow">SECURE  ACCESS</div>
+        <img className="login-card-logo-bare" src="/pdp-logo.png" alt="E Monitoring Kwara logo" />
+        <div className="eyebrow">SECURE ACCESS</div>
         <h2>Welcome back</h2>
         <p className="muted">Sign in with your authorized election operations credentials.</p>
         <label>

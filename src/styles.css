@@ -127,6 +127,9 @@ body{background:var(--wine-950)}
 }
 .login-brand{max-width:720px}
 .campaign-logo{display:block;width:min(430px,78%);max-height:210px;object-fit:contain;object-position:left center;margin:0 0 42px;filter:drop-shadow(0 15px 28px #02130a80)}
+/* Bare logo — no gradient wrapper, just the circular party logo */
+.campaign-logo-bare{display:block;width:min(160px,38%);height:auto;object-fit:contain;margin:0 0 42px;border-radius:50%;box-shadow:0 8px 32px #02130a80}
+.login-card-logo-bare{display:none;width:100px;height:100px;object-fit:contain;margin:0 auto 24px;border-radius:50%;box-shadow:0 6px 20px #02130a80}
 .command-kicker{margin:0 0 15px!important;color:var(--gold-400)!important;font-size:11px!important;letter-spacing:.22em;text-transform:uppercase}
 .command-title{max-width:720px;margin:0!important;color:var(--cream)!important;font-size:clamp(40px,5vw,76px)!important;line-height:.98!important;letter-spacing:-.045em!important;font-weight:800!important;text-wrap:balance}
 .command-copy{max-width:620px;margin:28px 0 0;color:#eadde1!important;font-size:clamp(16px,1.35vw,20px)!important;line-height:1.65!important;font-weight:450!important}
@@ -191,6 +194,7 @@ aside,.command-sidebar{background:linear-gradient(180deg,#12351d,#21060f)!import
   .login-brand{display:none}
   .login-card{justify-self:center;max-width:470px;padding:34px 28px!important}
   .login-card-logo{display:block}
+  .login-card-logo-bare{display:block}
 }
 @media(max-width:480px){
   .login-shell{padding:14px}
