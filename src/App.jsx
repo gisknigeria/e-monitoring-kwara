@@ -1541,23 +1541,6 @@ function MapView({
               ? `<strong>${escapeMapText(name)}</strong><br>${escapeMapText(partyMapAnalysis.party)}: ${escapeMapText(statusLabel)}${escapeMapText(margin)}`
               : escapeMapText(name);
             layerGeo.bindTooltip(tooltip, { permanent: false, sticky: true, className: "nigeria-lga-tooltip" });
-            try {
-              const center = layerGeo.getBounds().getCenter();
-              if (showBoundaryNames) {
-                const label = L.marker(center, {
-                  icon: L.divIcon({
-                    className: "nigeria-lga-label",
-                    html: `<span>${escapeMapText(name)}</span>`,
-                    iconSize: null,
-                    iconAnchor: [0, 0],
-                  }),
-                  interactive: false,
-                  zIndexOffset: -50,
-                });
-                label.addTo(map);
-                nigeriaLgaLabels.current.push(label);
-              }
-            } catch {}
           }
           layerGeo.on({
             mouseover: (e) => {
@@ -1576,6 +1559,36 @@ function MapView({
     ).addTo(map);
     nigeriaLgaOverlay.current = lgaLayer;
     lgaLayer.bringToFront();
+
+    // Create LGA name labels
+    if (showBoundaryNames && lgaFeatures.length) {
+      lgaFeatures.forEach((feature) => {
+        const name = feature.properties?.ADM2_EN || feature.properties?.lga_name || feature.properties?.LGA || feature.properties?.lga || feature.properties?.LTNAME || feature.properties?.name || "";
+        if (!name || !feature.geometry?.coordinates?.length) return;
+
+        try {
+          // Calculate centroid from polygon coordinates
+          const coords = feature.geometry.coordinates[0] || [];
+          const lats = coords.map(c => c[1]);
+          const lngs = coords.map(c => c[0]);
+          const centroidLat = (Math.min(...lats) + Math.max(...lats)) / 2;
+          const centroidLng = (Math.min(...lngs) + Math.max(...lngs)) / 2;
+
+          const labelMarker = L.marker([centroidLat, centroidLng], {
+            icon: L.divIcon({
+              className: "lga-name-label",
+              html: `<div class="lga-label-text">${escapeMapText(name)}</div>`,
+              iconSize: [120, 30],
+              iconAnchor: [60, 15],
+            }),
+            interactive: false,
+            pane: "overlayPane",
+          }).addTo(map);
+
+          nigeriaLgaLabels.current.push(labelMarker);
+        } catch {}
+      });
+    }
   }, [showLgaBorders, showBoundaryNames, mapLayers, onBoundarySelect, oyoBoundaries.lgas, partyMapAnalysis, partyLgaResults]);
 
   useEffect(() => {
