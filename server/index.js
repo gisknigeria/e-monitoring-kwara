@@ -924,7 +924,7 @@ app.post('/api/news/summary', auth, adminOnly, rateLimit, asyncRoute(async (req,
       return res.json({ summary, model, provider: 'gemini' });
     } catch (error) {
       console.error('[gemini-news] both models failed:', error.message);
-      return res.json({ provider: 'local', model: 'statistical-fallback', summary: `AI provider unavailable. ${articles.length} Kwara-related headlines were retrieved. Review the linked sources, prioritize the newest reports, and verify claims against official Kwara State and INEC channels before acting.` });
+      return res.json({ provider: 'local', model: 'statistical-fallback', summary: `Summary service unavailable. ${articles.length} Kwara-related headlines were retrieved. Review the linked sources, prioritize the newest reports, and verify claims against official Kwara State and INEC channels before acting.` });
     }
   }
 
@@ -937,7 +937,7 @@ app.post('/api/news/summary', auth, adminOnly, rateLimit, asyncRoute(async (req,
         body: JSON.stringify({ model, input: prompt, max_output_tokens: 600 }),
       });
       const b = await r.json().catch(() => ({}));
-      if (!r.ok) { const e = new Error(b?.error?.message || 'AI request failed'); e.status = r.status; throw e; }
+      if (!r.ok) { const e = new Error(b?.error?.message || 'Summary request failed'); e.status = r.status; throw e; }
       return b.output_text || '';
     };
     try {
@@ -946,7 +946,7 @@ app.post('/api/news/summary', auth, adminOnly, rateLimit, asyncRoute(async (req,
       try { summary = await call(model); } catch (e) { if (![400, 404, 429].includes(e.status)) throw e; model = openAiFallbackModel; summary = await call(model); }
       return res.json({ summary, model, provider: 'openai' });
     } catch {
-      return res.status(503).json({ message: 'AI news summary unavailable.' });
+      return res.status(503).json({ message: 'News summary unavailable.' });
     }
   }
 
@@ -1015,8 +1015,8 @@ app.post('/api/analysis/ai', auth, adminOnly, rateLimit, asyncRoute(async (req, 
       }
       return res.json({ analysis, model: usedModel, fallbackUsed: usedModel !== openAiPrimaryModel, provider: 'openai' });
     } catch (error) {
-      console.error('AI analysis unavailable:', error.message);
-      return res.status(503).json({ message: 'AI analysis is temporarily unavailable; statistical analysis remains available.' });
+      console.error('Operational analysis unavailable:', error.message);
+      return res.status(503).json({ message: 'Operational analysis is temporarily unavailable; statistical analysis remains available.' });
     }
   }
 
