@@ -559,6 +559,7 @@ const normalizeNewsDate = value => { const raw = String(value || '').trim(); con
 const isKwaraStateNews = value => {
   const text = String(value || '');
   if (/\bkwara state\b|\bilorin\b|\boffa\b|\bjebba\b/i.test(text)) return true;
+  if (/\bsuleiman bolakale kawu\b|\bsbk\b/i.test(text) && /\bkwara\b|\bpdp\b|\bgovernorship\b|\b2027\b/i.test(text)) return true;
   const hasBareKwara = /\bkwara\b/i.test(text);
   const hasLocalContext = /\bnigeria(?:n)?\b|\binec\b|\babdulrazaq\b|\bgovern(?:or|ment|ance)\b|\bstate assembly\b|\bcommissioner\b|\bpolice\b|\bsecurity\b|\bcp\b|\blga\b|\blocal government\b|\bmonarchs?\b|\bresidents?\b|\bpolitic(?:s|al)?\b|\belections?\b|\bapc\b|\bpdp\b|\blabour party\b/i.test(text);
   return hasBareKwara && hasLocalContext;
@@ -808,7 +809,7 @@ app.get('/api/ai/status', auth, adminOnly, rateLimit, (_, res) => {
   res.json({ configured: provider !== 'none', provider, model: models[0], fallbackModel: models[1] });
 });
 app.get('/api/news', auth, rateLimit, asyncRoute(async (req, res) => {
-  const q = String(req.query.q || 'Kwara State election').slice(0, 180);
+  const q = String(req.query.q || 'Kwara State politics INEC elections parties security SBK PDP governorship 2027').slice(0, 180);
   const configuredParties = (await store.parties())
     .slice(0, 20)
     .map(party => sanitizeString(party).replace(/["()]/g, ' ').trim())
@@ -818,7 +819,7 @@ app.get('/api/news', auth, rateLimit, asyncRoute(async (req, res) => {
   if (process.env.GNEWS_API_KEY) {
     const gnewsPartyTerms = partyQueryTerms.slice(0, 5);
     const gnewsQuery = /kwara|ilorin/i.test(q)
-      ? `("Kwara State" OR Ilorin OR Offa OR Jebba OR "Governor AbdulRazaq" OR "INEC Kwara"${gnewsPartyTerms.length ? ` OR ${gnewsPartyTerms.join(' OR ')}` : ''})`
+      ? `("Kwara State" OR Ilorin OR Offa OR Jebba OR "Governor AbdulRazaq" OR "INEC Kwara" OR "Suleiman Bolakale Kawu" OR "SBK Kwara" OR "Kwara 2027"${gnewsPartyTerms.length ? ` OR ${gnewsPartyTerms.join(' OR ')}` : ''})`
       : q;
     const gnews = await fetch(`https://gnews.io/api/v4/search?q=${encodeURIComponent(gnewsQuery)}&lang=en&max=50&sortby=publishedAt&apikey=${encodeURIComponent(process.env.GNEWS_API_KEY)}`, { headers: { 'User-Agent': 'Election-Monitor/1.0' } }).catch(() => null);
     if (gnews?.ok) {
@@ -830,7 +831,7 @@ app.get('/api/news', auth, rateLimit, asyncRoute(async (req, res) => {
   }
   // Keep the query broad: requiring every keyword at once produces empty
   // results because most articles mention only one location or party.
-  const query = `("${q}" OR "Kwara State" OR Ilorin OR Offa OR Jebba OR "Governor AbdulRazaq" OR "Kwara government" OR "INEC Kwara" OR "Kwara election"${partyQueryTerms.length ? ` OR ${partyQueryTerms.slice(0, 10).join(' OR ')}` : ''})`;
+  const query = `("${q}" OR "Kwara State" OR Ilorin OR Offa OR Jebba OR "Governor AbdulRazaq" OR "Kwara government" OR "INEC Kwara" OR "Kwara election" OR "Kwara security" OR "Suleiman Bolakale Kawu" OR "SBK Kwara PDP" OR "Kwara governorship 2027"${partyQueryTerms.length ? ` OR ${partyQueryTerms.slice(0, 10).join(' OR ')}` : ''})`;
   const url = `https://api.gdeltproject.org/api/v2/doc/doc?query=${encodeURIComponent(query)}&mode=artlist&format=json&maxrecords=50&sort=HybridRel`;
   let data;
   try {
@@ -858,6 +859,12 @@ app.get('/api/news', auth, rateLimit, asyncRoute(async (req, res) => {
     '"Kwara State House of Assembly"',
     '"Kwara State" local government',
     '"Kwara State" upcoming election',
+    '"Kwara State" politics 2027',
+    '"Kwara State" governorship 2027',
+    '"Suleiman Bolakale Kawu" Kwara',
+    '"Suleiman Bolakale Kawu" PDP',
+    '"SBK" Kwara PDP',
+    '"SBK" Kwara governorship 2027',
     ...configuredParties.map(party => `"Kwara State" political party "${party}"`)
   ];
   const feeds = queries.map(term => `https://news.google.com/rss/search?q=${encodeURIComponent(term)}&hl=en-NG&gl=NG&ceid=NG:en`).concat(['https://punchng.com/feed/', 'https://www.premiumtimesng.com/feed', 'https://guardian.ng/feed/']);
@@ -885,7 +892,7 @@ app.get('/api/news', auth, rateLimit, asyncRoute(async (req, res) => {
 app.post('/api/news/summary', auth, adminOnly, rateLimit, asyncRoute(async (req, res) => {
   const articles = Array.isArray(req.body?.articles) ? req.body.articles.slice(0, 30) : [];
   if (!articles.length) return res.status(400).json({ message: 'News articles are required.' });
-  const newsPrompt = `Create a concise Kwara State news briefing using the supplied headlines and, when your model supports web search, current reputable web sources. Cover genuine Kwara State developments, prioritizing politics, INEC, elections, parties, governance, security, public services, and major local events. Return at most 160 words with exactly these plain-text sections: CURRENT PICTURE, TOP DEVELOPMENTS (maximum 4 bullets), WHAT TO MONITOR (maximum 3 bullets). Distinguish confirmed reporting from uncertainty. Do not use Markdown bold markers, persuade voters, or recommend partisan messaging.\n\nHEADLINES:\n${articles.map((item) => `${item.title} (${item.source})`).join('\n')}`;
+  const newsPrompt = `Create a concise Kwara State news briefing using the supplied headlines and, when your model supports web search, current reputable web sources. Prioritize Kwara State politics, INEC, elections, political parties, security, the 2027 governorship race, and credible reporting about Suleiman Bolakale Kawu (SBK) and the PDP. Include other major Kwara developments only when operationally important. Return at most 180 words with exactly these plain-text sections: CURRENT PICTURE, TOP DEVELOPMENTS (maximum 5 bullets), WHAT TO MONITOR (maximum 3 bullets). Clearly distinguish confirmed facts, declared or reported candidacy, speculation, and uncertainty. Do not describe SBK or anyone else as a confirmed candidate unless the supplied or verified reporting supports it. Do not use Markdown bold markers, persuade voters, or recommend partisan messaging.\n\nHEADLINES:\n${articles.map((item) => `${item.title} (${item.source})`).join('\n')}`;
 
   if (process.env.GROQ_API_KEY) {
     try {
@@ -929,7 +936,7 @@ app.post('/api/news/summary', auth, adminOnly, rateLimit, asyncRoute(async (req,
   }
 
   if (process.env.OPENAI_API_KEY) {
-    const prompt = `Summarize these election news headlines neutrally. Identify the hottest themes, confirmed facts versus uncertainty, and operational implications. Do not persuade voters or recommend partisan messaging.\n${articles.map((item) => `${item.title} (${item.source})`).join('\n')}`;
+    const prompt = `Summarize these Kwara State news headlines neutrally. Prioritize politics, INEC, elections, parties, security, the 2027 governorship race, and credible developments involving Suleiman Bolakale Kawu (SBK) and the PDP. Identify confirmed facts versus reported claims or uncertainty. Do not treat any person as a confirmed candidate without supporting reporting. Do not persuade voters or recommend partisan messaging.\n${articles.map((item) => `${item.title} (${item.source})`).join('\n')}`;
     const call = async (model) => {
       const r = await fetch('https://api.openai.com/v1/responses', {
         method: 'POST',

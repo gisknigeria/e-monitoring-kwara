@@ -4782,7 +4782,7 @@ function ResultsCenter({ incidents, parties = [], officers = [], mapLayers = [],
   useEffect(() => {
     if (view !== "news" || news.length) return;
     setNewsLoading(true);
-    request("/news?q=Kwara State", authToken).then(data => setNews(data.articles || [])).catch(error => { setNews([]); setNewsError(error.message || "News service unavailable"); }).finally(() => setNewsLoading(false));
+    request("/news?q=Kwara State politics INEC elections parties security SBK PDP governorship 2027", authToken).then(data => setNews(data.articles || [])).catch(error => { setNews([]); setNewsError(error.message || "News service unavailable"); }).finally(() => setNewsLoading(false));
   }, [view, news.length]);
   const reports = useMemo(
     () => incidents.filter((item) => item.reportType === POLLING_RESULT_TYPE),
@@ -6183,19 +6183,8 @@ function Dashboard({ session, onLogout, onSessionUpdate }) {
     let lastBroadcast = 0;
     let warmUpCount = 0;
 
-    // Unlock the gate after 8 seconds regardless — prevents permanent lockout
-    const gateUnlockTimer = setTimeout(() => {
-      if (isAgent) setGpsRequiredBlocked(false);
-    }, 8000);
-
     const onPosition = (position) => {
       const { latitude, longitude, accuracy, speed, heading } = position.coords;
-
-      // Unblock the agent gate as soon as any valid coords arrive
-      if (isAgent) {
-        setGpsRequiredBlocked(false);
-        clearTimeout(gateUnlockTimer);
-      }
 
       const fixAge = Date.now() - Number(position.timestamp || Date.now());
       if (!Number.isFinite(latitude) || !Number.isFinite(longitude) || !Number.isFinite(accuracy)) return;
@@ -6232,6 +6221,8 @@ function Dashboard({ session, onLogout, onSessionUpdate }) {
         heading: heading ?? 0,
         timestamp: new Date(now).toISOString(),
       };
+      // Agent accounts remain locked until a fresh, acceptably accurate fix exists.
+      if (isAgent) setGpsRequiredBlocked(false);
 
       warmUpCount++;
 
@@ -6272,19 +6263,15 @@ function Dashboard({ session, onLogout, onSessionUpdate }) {
     };
 
     const onError = (error) => {
-      // PERMISSION_DENIED — hard stop
-      if (error.code === 1) {
-        clearTimeout(gateUnlockTimer);
-        if (gpsWatchRef.current != null)
-          navigator.geolocation.clearWatch(gpsWatchRef.current);
-        gpsWatchRef.current = null;
-        setSharingGps(false);
-        setNotice("Location permission was denied — please enable location in your browser settings and try again");
-        if (isAgent) setGpsRequiredBlocked(true);
-        return;
-      }
-      // POSITION_UNAVAILABLE or TIMEOUT — keep the watch alive, just show notice
-      setNotice("GPS signal lost — retrying...");
+      if (gpsWatchRef.current != null)
+        navigator.geolocation.clearWatch(gpsWatchRef.current);
+      gpsWatchRef.current = null;
+      gpsBestRef.current = null;
+      setSharingGps(false);
+      if (isAgent) setGpsRequiredBlocked(true);
+      setNotice(error.code === 1
+        ? "Location permission was denied — enable location in your browser settings and try again"
+        : "A valid location could not be obtained — check GPS and try again");
     };
 
     gpsWatchRef.current = navigator.geolocation.watchPosition(
@@ -8283,7 +8270,7 @@ function Dashboard({ session, onLogout, onSessionUpdate }) {
           </div>
         </div>
       )}
-      {gpsRequiredBlocked && isAgent && <div className="modal-backdrop gps-required-gate"><div className="modal"><span className="eyebrow">LOCATION REQUIRED</span><h2>Allow Location</h2><p>Your location needs to be shared before you can use the app. Tap the button below and allow location access when prompted.</p><button className="primary wide" onClick={toggleGps}><LuLocateFixed /> Allow Location</button><button className="ghost wide" style={{marginTop:10}} onClick={() => setGpsRequiredBlocked(false)}>Skip for now</button></div></div>}
+      {gpsRequiredBlocked && isAgent && <div className="modal-backdrop gps-required-gate"><div className="modal"><span className="eyebrow">LOCATION REQUIRED</span><h2>Allow Location</h2><p>Location sharing is mandatory for Agent accounts. The app will remain locked until you allow access and a valid location is received.</p><button className="primary wide" onClick={toggleGps} disabled={sharingGps}><LuLocateFixed /> {sharingGps ? "Waiting for Location…" : "Allow Location"}</button></div></div>}
       {partyManagerOpen && canAdmin && <PartyManager parties={parties} onClose={() => setPartyManagerOpen(false)} onSave={saveParties} />}
       {emergencyOpen && (
         <EmergencyPanel
