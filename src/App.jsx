@@ -18,6 +18,8 @@ import {
   FaKey,
   FaLocationArrow,
   FaMapMarkedAlt,
+  FaMicrophone,
+  FaMicrophoneSlash,
   FaRoute,
   FaRulerCombined,
   FaSearch,
@@ -29,6 +31,9 @@ import {
   FaTools,
   FaUserCog,
   FaVideo,
+  FaVolumeDown,
+  FaVolumeMute,
+  FaVolumeUp,
 } from "react-icons/fa";
 import { LuLocateFixed } from "react-icons/lu";
 import {
@@ -2768,6 +2773,8 @@ function StreamVideo({ src, stream, muted = false, showControls = true }) {
   const recorderRef = useRef(null);
   const chunksRef = useRef([]);
   const [recording, setRecording] = useState(false);
+  const [soundMuted, setSoundMuted] = useState(muted);
+  const [volume, setVolume] = useState(muted ? 0 : 1);
   useEffect(() => {
     const video = ref.current;
     if (!video) return;
@@ -2790,6 +2797,20 @@ function StreamVideo({ src, stream, muted = false, showControls = true }) {
       video.removeAttribute("src");
     };
   }, [src, stream]);
+  useEffect(() => {
+    const video = ref.current;
+    if (!video) return;
+    video.muted = soundMuted || volume === 0;
+    video.volume = Math.max(0, Math.min(1, volume));
+  }, [soundMuted, volume]);
+  const toggleSound = () => {
+    if (soundMuted || volume === 0) {
+      setSoundMuted(false);
+      if (volume === 0) setVolume(1);
+    } else {
+      setSoundMuted(true);
+    }
+  };
   const toggleRecording = () => {
     if (recording) {
       recorderRef.current?.stop();
@@ -2829,14 +2850,20 @@ function StreamVideo({ src, stream, muted = false, showControls = true }) {
   };
   return (
     <div className="recordable-video">
-      <video ref={ref} controls={showControls} autoPlay playsInline muted={muted} />
+      <video ref={ref} controls={showControls} autoPlay playsInline muted={soundMuted} />
       {showControls && (
-        <button
-          className={recording ? "record-stop" : ""}
-          onClick={toggleRecording}
-        >
-          {recording ? "Stop & save" : "Record"}
-        </button>
+        <>
+          <div className="stream-audio-controls">
+            <button type="button" onClick={toggleSound} title={soundMuted || volume === 0 ? "Turn sound on" : "Turn sound off"} aria-label={soundMuted || volume === 0 ? "Turn sound on" : "Turn sound off"}>
+              {soundMuted || volume === 0 ? <FaVolumeMute /> : volume < 0.5 ? <FaVolumeDown /> : <FaVolumeUp />}
+            </button>
+            <input type="range" min="0" max="1" step="0.05" value={soundMuted ? 0 : volume} onChange={(event) => { const nextVolume = Number(event.target.value); setVolume(nextVolume); setSoundMuted(nextVolume === 0); }} aria-label="Stream volume" title={`Volume ${Math.round((soundMuted ? 0 : volume) * 100)}%`} />
+            <span>{Math.round((soundMuted ? 0 : volume) * 100)}%</span>
+          </div>
+          <button type="button" className={`stream-record-button ${recording ? "record-stop" : ""}`} onClick={toggleRecording}>
+            {recording ? "Stop & save" : "Record"}
+          </button>
+        </>
       )}
     </div>
   );
@@ -2846,6 +2873,7 @@ function CameraPanel({
   cameras,
   phoneShares,
   remoteStreams,
+  turnStatus,
   isAdmin,
   onClose,
   onCreate,
@@ -2888,6 +2916,15 @@ function CameraPanel({
     CCTV: cameraFeeds.filter((x) => x.feedType === "CCTV").length,
     Drone: cameraFeeds.filter((x) => x.feedType === "Drone").length,
   };
+  const turnStatusLabel = turnStatus?.route === "turn"
+    ? "Connected via Metered TURN"
+    : turnStatus?.provider === "metered" && turnStatus?.route === "direct"
+      ? "Metered ready · direct route"
+      : turnStatus?.provider === "metered"
+        ? `Metered TURN ready${turnStatus?.region ? ` · ${turnStatus.region}` : ""}`
+        : turnStatus?.provider === "stun-fallback"
+          ? "STUN fallback only"
+          : "Checking TURN";
 
   useEffect(() => {
     if (!isAdmin) return;
@@ -3010,9 +3047,14 @@ function CameraPanel({
           <span className="eyebrow">LIVE VISUAL INTELLIGENCE</span>
           <h2>{view === "Drone" ? "Drone view" : "Camera feeds"}</h2>
         </div>
-        <button className="icon-btn" onClick={onClose}>
-          <FaTimes />
-        </button>
+        <div className="camera-head-actions">
+          <span className={`turn-status ${turnStatus?.route === "turn" ? "relayed" : turnStatus?.provider === "metered" ? "ready" : "fallback"}`}>
+            {turnStatusLabel}
+          </span>
+          <button className="icon-btn" onClick={onClose}>
+            <FaTimes />
+          </button>
+        </div>
       </div>
       <div className="camera-tabs">
         {["All", "Phone", "CCTV", "Drone"].map((tab) => (
@@ -4976,10 +5018,12 @@ function Dashboard({ session, onLogout, onSessionUpdate }) {
   const [cameraPanel, setCameraPanel] = useState(false);
   const [phoneShares, setPhoneShares] = useState([]);
   const [remoteStreams, setRemoteStreams] = useState({});
+  const [turnStatus, setTurnStatus] = useState({ provider: "checking", region: "", route: "pending" });
   const [sharingCamera, setSharingCamera] = useState(false);
   const [selfCameraPreview, setSelfCameraPreview] = useState(false);
   const [cameraPreviewMode, setCameraPreviewMode] = useState(true); // true = show preview, false = background mode
   const [cameraFacingMode, setCameraFacingMode] = useState("environment");
+  const [cameraMicMuted, setCameraMicMuted] = useState(false);
   const [operationsOpen, setOperationsOpen] = useState(false);
   const [toolsOpen, setToolsOpen] = useState(false);
   const [ipLogOpen, setIpLogOpen] = useState(false);
@@ -5008,6 +5052,7 @@ function Dashboard({ session, onLogout, onSessionUpdate }) {
   const sosHoldTimerRef = useRef(null);
   const sosLongTriggeredRef = useRef(false);
   const localCameraStreamRef = useRef(null);
+  const cameraMicMutedRef = useRef(false);
   const rtcPeersRef = useRef({});
   const sharingCameraRef = useRef(false);
   const offlineRecorderRef = useRef(null);
@@ -5247,27 +5292,59 @@ function Dashboard({ session, onLogout, onSessionUpdate }) {
     socket.on("connect", registerCameraUser);
     if (socket.connected) registerCameraUser();
     const fallbackIceServers = [{ urls: "stun:stun.l.google.com:19302" }];
-    const iceServersPromise = request("/turn/credentials", session.token)
-      .then((result) =>
-        Array.isArray(result?.iceServers) && result.iceServers.length
+    const iceConfigurationPromise = request("/turn/credentials", session.token)
+      .then((result) => {
+        const provider = result?.provider || "stun-fallback";
+        const region = result?.region || "";
+        const iceServers = Array.isArray(result?.iceServers) && result.iceServers.length
           ? result.iceServers
-          : fallbackIceServers,
-      )
-      .catch(() => fallbackIceServers);
+          : fallbackIceServers;
+        console.info(`[camera] ICE provider: ${provider}${region ? ` (${region})` : ""}`);
+        setTurnStatus({ provider, region, route: provider === "metered" ? "ready" : "fallback" });
+        return { iceServers, provider, region };
+      })
+      .catch((error) => {
+        console.warn("[camera] TURN credentials unavailable; using STUN fallback", error);
+        setTurnStatus({ provider: "stun-fallback", region: "", route: "fallback" });
+        return { iceServers: fallbackIceServers, provider: "stun-fallback", region: "" };
+      });
+    const detectIceRoute = async (pc) => {
+      try {
+        const stats = await pc.getStats();
+        let selectedPair = null;
+        stats.forEach((report) => {
+          if (report.type === "transport" && report.selectedCandidatePairId)
+            selectedPair = stats.get(report.selectedCandidatePairId) || selectedPair;
+        });
+        if (!selectedPair) {
+          stats.forEach((report) => {
+            if (report.type === "candidate-pair" && report.state === "succeeded" && (report.nominated || report.selected))
+              selectedPair = report;
+          });
+        }
+        const localCandidate = selectedPair?.localCandidateId ? stats.get(selectedPair.localCandidateId) : null;
+        const remoteCandidate = selectedPair?.remoteCandidateId ? stats.get(selectedPair.remoteCandidateId) : null;
+        return [localCandidate, remoteCandidate].some((candidate) => candidate?.candidateType === "relay") ? "turn" : "direct";
+      } catch {
+        return "direct";
+      }
+    };
     const makePeer = async (key, remoteUserId) => {
-      const iceServers = await iceServersPromise;
+      const iceConfiguration = await iceConfigurationPromise;
       const pc = new RTCPeerConnection({
-        iceServers,
+        iceServers: iceConfiguration.iceServers,
       });
       const connectionTimer = setTimeout(() => {
         if (pc.connectionState !== "connected" && localCameraStreamRef.current)
           startOfflineVideoRecording("Live video could not connect");
       }, 15000);
-      pc.onconnectionstatechange = () => {
+      pc.onconnectionstatechange = async () => {
         if (pc.connectionState === "connected") {
           clearTimeout(connectionTimer);
           stopOfflineVideoRecording();
-          setNotice("Live video connected");
+          const route = await detectIceRoute(pc);
+          setTurnStatus({ provider: iceConfiguration.provider, region: iceConfiguration.region, route });
+          setNotice(route === "turn" ? "Live video connected via Metered TURN" : "Live video connected directly");
           setTimeout(() => setNotice(""), 2500);
         } else if (["failed", "disconnected"].includes(pc.connectionState)) {
           startOfflineVideoRecording(
@@ -5470,6 +5547,7 @@ function Dashboard({ session, onLogout, onSessionUpdate }) {
               video: { facingMode: { ideal: facingMode }, width: { ideal: 1280 }, height: { ideal: 720 } },
               audio: true,
             });
+            newStream.getAudioTracks().forEach((track) => { track.enabled = !cameraMicMutedRef.current; });
             localCameraStreamRef.current = newStream;
             // Replace tracks in all active peer connections
             Object.values(rtcPeersRef.current).forEach((pc) => {
@@ -6860,6 +6938,8 @@ function Dashboard({ session, onLogout, onSessionUpdate }) {
       socketRef.current?.emit("camera:share:stop", { userId: session.user.id });
       setSharingCamera(false);
       setSelfCameraPreview(false);
+      setCameraMicMuted(false);
+      cameraMicMutedRef.current = false;
       releaseWakeLock();
       stopSilentAudio();
       setNotice("Camera sharing stopped");
@@ -6868,8 +6948,11 @@ function Dashboard({ session, onLogout, onSessionUpdate }) {
     try {
       const stream = await getCameraStream(cameraFacingMode);
       localCameraStreamRef.current = stream;
+      stream.getAudioTracks().forEach((track) => { track.enabled = true; });
       sharingCameraRef.current = true;
       setSharingCamera(true);
+      setCameraMicMuted(false);
+      cameraMicMutedRef.current = false;
       setSelfCameraPreview(cameraPreviewMode);
       acquireWakeLock();
       startSilentAudio();
@@ -6905,6 +6988,20 @@ function Dashboard({ session, onLogout, onSessionUpdate }) {
       );
     }
     setTimeout(() => setNotice(""), 3000);
+  };
+  const toggleCameraMicrophone = () => {
+    const audioTracks = localCameraStreamRef.current?.getAudioTracks() || [];
+    if (!audioTracks.length) {
+      setNotice("No microphone is available for this stream");
+      setTimeout(() => setNotice(""), 2500);
+      return;
+    }
+    const nextMuted = !cameraMicMuted;
+    audioTracks.forEach((track) => { track.enabled = !nextMuted; });
+    setCameraMicMuted(nextMuted);
+    cameraMicMutedRef.current = nextMuted;
+    setNotice(nextMuted ? "Microphone muted" : "Microphone live");
+    setTimeout(() => setNotice(""), 2000);
   };
   const switchCamera = async () => {
     if (!sharingCamera || !localCameraStreamRef.current) return;
@@ -6944,6 +7041,7 @@ function Dashboard({ session, onLogout, onSessionUpdate }) {
     } catch (error) {
       try {
         const restoredStream = await getCameraStream(cameraFacingMode);
+        restoredStream.getAudioTracks().forEach((track) => { track.enabled = !cameraMicMuted; });
         localCameraStreamRef.current = restoredStream;
         Object.values(rtcPeersRef.current).forEach((pc) => {
           const videoSender = pc.getSenders().find((sender) => sender.track?.kind === "video");
@@ -7837,6 +7935,10 @@ function Dashboard({ session, onLogout, onSessionUpdate }) {
           <div className="self-camera-preview-head">
             <b><i></i> LIVE</b>
             <div className="self-camera-preview-actions">
+              <button type="button" className={cameraMicMuted ? "mic-muted" : "mic-live"} title={cameraMicMuted ? "Unmute microphone" : "Mute microphone"} onClick={toggleCameraMicrophone}>
+                {cameraMicMuted ? <FaMicrophoneSlash /> : <FaMicrophone />}
+                <span>{cameraMicMuted ? "Unmute" : "Mute"}</span>
+              </button>
               <button
                 type="button"
                 title="Hide preview (keep sharing)"
@@ -7873,6 +7975,9 @@ function Dashboard({ session, onLogout, onSessionUpdate }) {
         <div className="camera-live-pill">
           <i></i>
           <span>LIVE</span>
+          <button type="button" className={cameraMicMuted ? "mic-muted" : "mic-live"} title={cameraMicMuted ? "Unmute microphone" : "Mute microphone"} onClick={toggleCameraMicrophone}>
+            {cameraMicMuted ? <FaMicrophoneSlash /> : <FaMicrophone />}
+          </button>
           <button
             type="button"
             title="Show preview"
@@ -8295,6 +8400,7 @@ function Dashboard({ session, onLogout, onSessionUpdate }) {
           cameras={cameras}
           phoneShares={phoneShares}
           remoteStreams={remoteStreams}
+          turnStatus={turnStatus}
           isAdmin={canAdmin}
           onClose={() => setCameraPanel(false)}
           onCreate={createCamera}
