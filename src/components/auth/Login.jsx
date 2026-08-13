@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import { FaEye, FaEyeSlash } from "react-icons/fa";
 
 const API = "/api";
@@ -34,27 +34,9 @@ export default function Login({ onLogin }) {
   const [showPassword, setShowPassword] = useState(false);
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
-  const [installPrompt, setInstallPrompt] = useState(null);
 
-  useEffect(() => {
-    const beforeInstall = (event) => {
-      event.preventDefault();
-      setInstallPrompt(event);
-    };
-
-    window.addEventListener("beforeinstallprompt", beforeInstall);
-    return () => window.removeEventListener("beforeinstallprompt", beforeInstall);
-  }, []);
-
-  const installApp = async () => {
-    if (!installPrompt) {
-      setError("Use your browser menu and choose Install app / Add to Home screen.");
-      return;
-    }
-
-    installPrompt.prompt();
-    await installPrompt.userChoice.catch(() => {});
-    setInstallPrompt(null);
+  const installApp = () => {
+    setError("Use your browser menu and choose Install app / Add to Home screen.");
   };
 
   const submit = async (e) => {

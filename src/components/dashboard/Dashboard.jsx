@@ -1,9 +1,8 @@
 ﻿import { useEffect, useMemo, useRef, useState } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
+import { lazy, Suspense } from "react";
 import L from "leaflet";
 import { io } from "socket.io-client";
-import Hls from "hls.js";
-import shp from "shpjs";
 import {
   FaBullseye,
   FaCamera,
@@ -79,30 +78,19 @@ import {
   MdCropSquare,
   MdAdjust,
 } from "react-icons/md";
-import {
-  DEFAULT_REGISTRATION_STATE,
-  NIGERIA_STATES,
-  POLLING_UNITS,
-  STATE_CODE_TO_NAME,
-  normalizeRegistrationState,
-  UNIT_TYPES,
-  WARDS,
-  getRegistrationLocationOptions,
-} from "../../../shared/electionData.js";
-
 import ProfileModal from "./ProfileModal.jsx";
-import DashboardCameraPanel from "./CameraPanel.jsx";
 import DashboardChatPanel from "./ChatPanel.jsx";
 import DashboardEmergencyPanel from "./EmergencyPanel.jsx";
 import DashboardMapDataPanel from "./MapDataPanel.jsx";
 import DashboardToolsPanel from "./ToolsPanel.jsx";
-import {
-  IncidentForm,
-  OfficerManager,
-  PartyManager,
-  PollingResultForm,
-} from "./FieldModals.jsx";
 import Toast from "../ui/Toast.jsx";
+
+const loadFieldModals = () => import("./FieldModals.jsx");
+const DashboardCameraPanel = lazy(() => import("./CameraPanel.jsx"));
+const IncidentForm = lazy(() => loadFieldModals().then((module) => ({ default: module.IncidentForm })));
+const OfficerManager = lazy(() => loadFieldModals().then((module) => ({ default: module.OfficerManager })));
+const PartyManager = lazy(() => loadFieldModals().then((module) => ({ default: module.PartyManager })));
+const PollingResultForm = lazy(() => loadFieldModals().then((module) => ({ default: module.PollingResultForm })));
 
 const API = "/api";
 const OYO_CENTER = [8.4799, 4.5418];
@@ -1441,7 +1429,7 @@ function MapView({
             const performance = partyLgaResults[normalizeLgaMatch(name)];
             const status = performance?.status || (partyMapAnalysis?.party ? "no-data" : "");
             const statusLabel = status === "winning" ? "Winning" : status === "losing" ? "Losing" : status === "tied" ? "Tied" : status === "no-data" ? "No submitted result" : "";
-            const margin = performance?.margin ? ` Â· margin ${Number(performance.margin).toLocaleString()}` : "";
+            const margin = performance?.margin ? ` · margin ${Number(performance.margin).toLocaleString()}` : "";
             const tooltip = partyMapAnalysis?.party
               ? `<strong>${escapeMapText(name)}</strong><br>${escapeMapText(partyMapAnalysis.party)}: ${escapeMapText(statusLabel)}${escapeMapText(margin)}`
               : escapeMapText(name);
@@ -1765,12 +1753,23 @@ function StreamVideo({ src, stream, muted = false, showControls = true }) {
     }
     if (!src) return;
     let hls;
-    if (src.includes(".m3u8") && Hls.isSupported()) {
-      hls = new Hls({ lowLatencyMode: true });
-      hls.loadSource(src);
-      hls.attachMedia(video);
-    } else video.src = src;
+    let disposed = false;
+    const attachSource = async () => {
+      if (src.includes(".m3u8") && !video.canPlayType("application/vnd.apple.mpegurl")) {
+        const { default: Hls } = await import("hls.js");
+        if (disposed) return;
+        if (Hls.isSupported()) {
+          hls = new Hls({ lowLatencyMode: true });
+          hls.loadSource(src);
+          hls.attachMedia(video);
+          return;
+        }
+      }
+      video.src = src;
+    };
+    attachSource();
     return () => {
+      disposed = true;
       hls?.destroy();
       video.removeAttribute("src");
     };
@@ -1964,15 +1963,15 @@ function AnalyticsPanel({
 
   return (
     <section className={embedded ? "analytics-embedded" : full ? "results-center" : "analytics-panel"}>
-      {/* â”€â”€ Header â”€â”€ */}
+      {/* Header */}
       {!embedded && <div className="results-center-head ap-head">
         <div>
           <span className="eyebrow">INTELLIGENCE DASHBOARD</span>
           <h1>Map Analysis &amp; Reports</h1>
-          <p>Live operational pulse â€” incident distribution &amp; field analytics</p>
+          <p>Live operational pulse — incident distribution &amp; field analytics</p>
         </div>
         <div className="ap-head-right">
-          <div className="analytics-pulse">â— Live</div>
+          <div className="analytics-pulse">● Live</div>
           <button className="icon-btn" onClick={onClose} title="Close">
             <FaTimes />
           </button>
@@ -1981,12 +1980,12 @@ function AnalyticsPanel({
 
       <div className="results-center-body ap-body">
 
-        {/* â”€â”€ KPI stat cards â”€â”€ */}
+        {/* KPI stat cards */}
         <div className="ap-kpi-row">
           <div className="ap-kpi-card ap-kpi-red">
             <span className="ap-kpi-label">Total Incidents</span>
             <strong className="ap-kpi-val">{totalIncidents}</strong>
-            <span className="ap-kpi-sub">{openCount} open Â· {resolvedCount} resolved</span>
+            <span className="ap-kpi-sub">{openCount} open · {resolvedCount} resolved</span>
           </div>
           <div className="ap-kpi-card ap-kpi-orange">
             <span className="ap-kpi-label">High Risk</span>
@@ -2015,10 +2014,10 @@ function AnalyticsPanel({
           </div>
         </div>
 
-        {/* â”€â”€ Charts row â”€â”€ */}
+        {/* Charts row */}
         <div className="ap-charts-row">
 
-          {/* Donut â€” severity */}
+          {/* Donut — severity */}
           <div className="ap-card ap-donut-card">
             <div className="ap-card-head">
               <b>Severity Breakdown</b>
@@ -2058,7 +2057,7 @@ function AnalyticsPanel({
             </div>
           </div>
 
-          {/* Bar chart â€” report types */}
+          {/* Bar chart — report types */}
           <div className="ap-card ap-bar-card">
             <div className="ap-card-head">
               <b>Report Type Breakdown</b>
@@ -2122,7 +2121,7 @@ function AnalyticsPanel({
           </div>
         </div>
 
-        {/* â”€â”€ Polling unit summaries â”€â”€ */}
+        {/* Polling unit summaries */}
         {pollingUnitSummaries.length > 0 && (
           <div className="ap-card ap-polls-card">
             <div className="ap-card-head">
@@ -2270,12 +2269,12 @@ function ResultsCenter({ incidents, parties = [], officers = [], mapLayers = [],
       <main className="results-center-body">
         {view === "pulse" && <AnalyticsPanel incidents={incidents} officers={officers} mapLayers={mapLayers} selected={selected} onClose={onClose} onTool={onTool} onCsv={onCsv} onClear={onClear} embedded />}
         {["breakdown", "winloss", "winloss-lga"].includes(view) && <div className="wl-sub-tabs result-view-tabs"><button className={view === "breakdown" ? "wl-sub-tab active" : "wl-sub-tab"} onClick={() => setView("breakdown")}>Polling Unit Breakdown</button><button className={view !== "breakdown" ? "wl-sub-tab active" : "wl-sub-tab"} onClick={() => setView("winloss")}>Win / Loss Analysis</button></div>}
-        {["winloss", "winloss-lga"].includes(view) && <section className="result-total-strip"><article className="result-total-card grand"><span>Current projection</span><strong>{forecast.leader || "â€”"}</strong><small>{forecast.confidence}% indicative confidence; not a final result</small></article><article className="result-total-card"><span>Vote margin</span><strong>{forecast.margin.toLocaleString()}</strong><small>Against second place</small></article><article className="result-total-card"><span>Units covered</span><strong>{forecast.coverage.toLocaleString()}</strong><small>Unique submitted units</small></article></section>}
-        {view === "news" && <section className="result-table-card"><div className="result-table-title"><div><h2>Kwara State News</h2><p>General Kwara State coverage, including politics, INEC, elections, parties, governance, security, and major local developments.</p></div><div className="analysis-actions news-actions"><button className="primary action-btn refresh-news-btn" onClick={() => { setNews([]); setNewsSummary(""); setNewsSummaryError(""); setView("news"); }}><FaSyncAlt /> <span>Refresh</span></button><button className="secondary action-btn summary-action-btn" disabled={!news.length || newsSummaryLoading} onClick={() => { setNewsSummaryLoading(true); setNewsSummaryError(""); request("/news/summary", authToken, { method: "POST", body: JSON.stringify({ articles: news }) }).then((x) => { setNewsSummary(x.summary || "No summary available yet."); if (x.provider === "local") setNewsSummaryError("The summary service was unavailable, so a local fallback was generated."); else setNewsSummaryError(""); }).catch((error) => { setNewsSummary(""); setNewsSummaryError(error.message || "The summary request failed."); }).finally(() => setNewsSummaryLoading(false)); }}><MdFlashOn /> <span>{newsSummaryLoading ? "Workingâ€¦" : "Summary"}</span></button></div></div>{newsSummary && <div className="news-summary">{cleanSummaryText(newsSummary)}</div>}{newsSummaryError && <p className="muted">{newsSummaryError}</p>}{newsLoading ? <p>Loading current headlinesâ€¦</p> : <div className="news-list">{news.map(item => <article className="news-item" key={item.url}><a href={item.url} target="_blank" rel="noreferrer"><h3>{item.title}</h3></a><small>{item.source} Â· {item.publishedAt ? new Date(item.publishedAt).toLocaleString() : "Recent"}</small></article>)}{!news.length && <p>No current Kwara State headlines available.</p>}</div>}</section>}
-        {view === "action" && <section className="result-table-card" style={{ marginBottom: 16 }}><div className="result-table-title"><div><h2>Party performance & operational outlook</h2><p>Neutral analysis based only on submitted results and operational reports.</p></div><div className="analysis-actions"><label className="party-focus-field"><span>Party focus</span><select value={focusParty} onChange={e => setFocusParty(e.target.value)} aria-label="Select party for operational analysis"><option value="">All parties</option>{summary.partyNames.map(p => <option key={p} value={p}>{p}</option>)}</select></label><button className="primary action-btn summary-action-btn" disabled={outlookLoading} onClick={() => { const safeIncidents = incidents.slice(0, 100).map(item => ({ id: item.id, title: item.title, description: String(item.description || "").slice(0, 500), reportType: item.reportType, severity: item.severity, status: item.status, lga: item.lga, ward: item.ward, pollingUnit: item.pollingUnit, createdAt: item.createdAt })); setOutlookLoading(true); request("/analysis/ai", authToken, { method: "POST", body: JSON.stringify({ context: { projection: forecast, selectedParty: focusParty, partyAnalysis, incidents: safeIncidents, actions } }) }).then(x => setOutlook(x.analysis || "No operational analysis returned.")).catch(e => setOutlook(e.message || "Operational analysis unavailable.")).finally(() => setOutlookLoading(false)); }}><MdFlashOn /> <span>{outlookLoading ? "Analyzingâ€¦" : "Operational Analysis"}</span></button></div></div>{partyAnalysis && <p>{focusParty}: <b>{partyAnalysis.votes.toLocaleString()}</b> votes, leading in <b>{partyAnalysis.wards}</b> wards and <b>{partyAnalysis.lgas}</b> LGAs. Related incident mentions: <b>{partyAnalysis.incidents}</b>.</p>}{outlook && <div className="news-summary">{cleanSummaryText(outlook)}</div>}<ul>{actions.map(action => <li key={action}>{action}</li>)}</ul></section>}
+        {["winloss", "winloss-lga"].includes(view) && <section className="result-total-strip"><article className="result-total-card grand"><span>Current projection</span><strong>{forecast.leader || "—"}</strong><small>{forecast.confidence}% indicative confidence; not a final result</small></article><article className="result-total-card"><span>Vote margin</span><strong>{forecast.margin.toLocaleString()}</strong><small>Against second place</small></article><article className="result-total-card"><span>Units covered</span><strong>{forecast.coverage.toLocaleString()}</strong><small>Unique submitted units</small></article></section>}
+        {view === "news" && <section className="result-table-card"><div className="result-table-title"><div><h2>Kwara State News</h2><p>General Kwara State coverage, including politics, INEC, elections, parties, governance, security, and major local developments.</p></div><div className="analysis-actions news-actions"><button className="primary action-btn refresh-news-btn" onClick={() => { setNews([]); setNewsSummary(""); setNewsSummaryError(""); setView("news"); }}><FaSyncAlt /> <span>Refresh</span></button><button className="secondary action-btn summary-action-btn" disabled={!news.length || newsSummaryLoading} onClick={() => { setNewsSummaryLoading(true); setNewsSummaryError(""); request("/news/summary", authToken, { method: "POST", body: JSON.stringify({ articles: news }) }).then((x) => { setNewsSummary(x.summary || "No summary available yet."); if (x.provider === "local") setNewsSummaryError("The summary service was unavailable, so a local fallback was generated."); else setNewsSummaryError(""); }).catch((error) => { setNewsSummary(""); setNewsSummaryError(error.message || "The summary request failed."); }).finally(() => setNewsSummaryLoading(false)); }}><MdFlashOn /> <span>{newsSummaryLoading ? "Working…" : "Summary"}</span></button></div></div>{newsSummary && <div className="news-summary">{cleanSummaryText(newsSummary)}</div>}{newsSummaryError && <p className="muted">{newsSummaryError}</p>}{newsLoading ? <p>Loading current headlines…</p> : <div className="news-list">{news.map(item => <article className="news-item" key={item.url}><a href={item.url} target="_blank" rel="noreferrer"><h3>{item.title}</h3></a><small>{item.source} · {item.publishedAt ? new Date(item.publishedAt).toLocaleString() : "Recent"}</small></article>)}{!news.length && <p>No current Kwara State headlines available.</p>}</div>}</section>}
+        {view === "action" && <section className="result-table-card" style={{ marginBottom: 16 }}><div className="result-table-title"><div><h2>Party performance & operational outlook</h2><p>Neutral analysis based only on submitted results and operational reports.</p></div><div className="analysis-actions"><label className="party-focus-field"><span>Party focus</span><select value={focusParty} onChange={e => setFocusParty(e.target.value)} aria-label="Select party for operational analysis"><option value="">All parties</option>{summary.partyNames.map(p => <option key={p} value={p}>{p}</option>)}</select></label><button className="primary action-btn summary-action-btn" disabled={outlookLoading} onClick={() => { const safeIncidents = incidents.slice(0, 100).map(item => ({ id: item.id, title: item.title, description: String(item.description || "").slice(0, 500), reportType: item.reportType, severity: item.severity, status: item.status, lga: item.lga, ward: item.ward, pollingUnit: item.pollingUnit, createdAt: item.createdAt })); setOutlookLoading(true); request("/analysis/ai", authToken, { method: "POST", body: JSON.stringify({ context: { projection: forecast, selectedParty: focusParty, partyAnalysis, incidents: safeIncidents, actions } }) }).then(x => setOutlook(x.analysis || "No operational analysis returned.")).catch(e => setOutlook(e.message || "Operational analysis unavailable.")).finally(() => setOutlookLoading(false)); }}><MdFlashOn /> <span>{outlookLoading ? "Analyzing…" : "Operational Analysis"}</span></button></div></div>{partyAnalysis && <p>{focusParty}: <b>{partyAnalysis.votes.toLocaleString()}</b> votes, leading in <b>{partyAnalysis.wards}</b> wards and <b>{partyAnalysis.lgas}</b> LGAs. Related incident mentions: <b>{partyAnalysis.incidents}</b>.</p>}{outlook && <div className="news-summary">{cleanSummaryText(outlook)}</div>}<ul>{actions.map(action => <li key={action}>{action}</li>)}</ul></section>}
         {partyAnalysis && view !== "breakdown" && view !== "news" && <section className="party-lga-analysis"><div className="party-lga-summary"><div><span>Selected party</span><strong>{focusParty}</strong></div><div className="winning"><span>LGAs winning</span><strong>{partyAnalysis.winningLgas.length}</strong></div><div className="losing"><span>LGAs losing</span><strong>{partyAnalysis.losingLgas.length}</strong></div><div><span>Total votes</span><strong>{partyAnalysis.votes.toLocaleString()}</strong></div></div><div className="party-lga-columns"><section className="party-lga-column winning"><header><div><span className="performance-dot" />Winning LGAs</div><b>{partyAnalysis.winningLgas.length}</b></header><div className="party-lga-list">{partyAnalysis.winningLgas.map(item => <article key={item.name}><div><strong>{item.name}</strong><small>Ahead of {item.opponent}</small></div><div><b>+{item.margin.toLocaleString()}</b><small>{item.votes.toLocaleString()} votes</small></div></article>)}{!partyAnalysis.winningLgas.length && <p>No confirmed LGA lead for {focusParty} yet.</p>}</div></section><section className="party-lga-column losing"><header><div><span className="performance-dot" />Losing LGAs</div><b>{partyAnalysis.losingLgas.length}</b></header><div className="party-lga-list">{partyAnalysis.losingLgas.map(item => <article key={item.name}><div><strong>{item.name}</strong><small>Behind {item.opponent}</small></div><div><b>-{item.margin.toLocaleString()}</b><small>{item.votes.toLocaleString()} votes</small></div></article>)}{!partyAnalysis.losingLgas.length && <p>No confirmed LGA loss for {focusParty} yet.</p>}</div></section></div>{partyAnalysis.tiedLgas.length > 0 && <p className="party-tied-note">Tied in: {partyAnalysis.tiedLgas.join(", ")}.</p>}<p className="party-analysis-note">Leading in {partyAnalysis.wards} wards. Related incident mentions: {partyAnalysis.incidents}. Based only on submitted polling-unit results.</p></section>}
-        {view === "winloss" && <section className="result-table-card"><div className="result-table-title"><div><h2>Win / Loss Analysis</h2><p>Leading party by ward and LGA from submitted polling-unit results.</p></div><b>Top {top6.length} parties</b></div><div className="wl-sub-tabs"><button className="wl-sub-tab active">By Ward</button><button className="wl-sub-tab" onClick={() => setView("winloss-lga")}>By LGA</button></div><div className="result-table-scroll"><table className="result-progress-table"><thead><tr><th>Ward</th><th>Winner</th>{top6.map(p => <th key={p}>{p}</th>)}</tr></thead><tbody>{winLoss.wards.map(g => <tr key={g.label}><td>{g.label}</td><td><b>{g.winner || "â€”"}</b></td>{top6.map(p => <td key={p}>{g.votes[p].toLocaleString()} {g.winner === p ? "âœ“" : g.winner ? "âœ•" : ""}</td>)}</tr>)}{!winLoss.wards.length && <tr><td colSpan={top6.length + 2} className="result-empty">No ward-level data available yet.</td></tr>}</tbody></table></div></section>}
-        {view === "winloss-lga" && <section className="result-table-card"><div className="result-table-title"><div><h2>LGA Win / Loss Analysis</h2><p>Leading party in each Local Government Area.</p></div></div><div className="wl-sub-tabs"><button className="wl-sub-tab" onClick={() => setView("winloss")}>By Ward</button><button className="wl-sub-tab active">By LGA</button></div><div className="result-table-scroll"><table className="result-progress-table"><thead><tr><th>LGA</th><th>Winner</th>{top6.map(p => <th key={p}>{p}</th>)}</tr></thead><tbody>{winLoss.lgas.map(g => <tr key={g.label}><td><b>{g.label}</b></td><td><b>{g.winner || "â€”"}</b></td>{top6.map(p => <td key={p}>{g.votes[p].toLocaleString()} {g.winner === p ? "âœ“" : g.winner ? "âœ•" : ""}</td>)}</tr>)}</tbody></table></div></section>}
+        {view === "winloss" && <section className="result-table-card"><div className="result-table-title"><div><h2>Win / Loss Analysis</h2><p>Leading party by ward and LGA from submitted polling-unit results.</p></div><b>Top {top6.length} parties</b></div><div className="wl-sub-tabs"><button className="wl-sub-tab active">By Ward</button><button className="wl-sub-tab" onClick={() => setView("winloss-lga")}>By LGA</button></div><div className="result-table-scroll"><table className="result-progress-table"><thead><tr><th>Ward</th><th>Winner</th>{top6.map(p => <th key={p}>{p}</th>)}</tr></thead><tbody>{winLoss.wards.map(g => <tr key={g.label}><td>{g.label}</td><td><b>{g.winner || "—"}</b></td>{top6.map(p => <td key={p}>{g.votes[p].toLocaleString()} {g.winner === p ? "✓" : g.winner ? "✕" : ""}</td>)}</tr>)}{!winLoss.wards.length && <tr><td colSpan={top6.length + 2} className="result-empty">No ward-level data available yet.</td></tr>}</tbody></table></div></section>}
+        {view === "winloss-lga" && <section className="result-table-card"><div className="result-table-title"><div><h2>LGA Win / Loss Analysis</h2><p>Leading party in each Local Government Area.</p></div></div><div className="wl-sub-tabs"><button className="wl-sub-tab" onClick={() => setView("winloss")}>By Ward</button><button className="wl-sub-tab active">By LGA</button></div><div className="result-table-scroll"><table className="result-progress-table"><thead><tr><th>LGA</th><th>Winner</th>{top6.map(p => <th key={p}>{p}</th>)}</tr></thead><tbody>{winLoss.lgas.map(g => <tr key={g.label}><td><b>{g.label}</b></td><td><b>{g.winner || "—"}</b></td>{top6.map(p => <td key={p}>{g.votes[p].toLocaleString()} {g.winner === p ? "✓" : g.winner ? "✕" : ""}</td>)}</tr>)}</tbody></table></div></section>}
         {["winloss", "winloss-lga"].includes(view) && <div className="result-table-card" style={{marginTop: 16}}><p className="muted">Select a party in the Action tab to compare its wins and losses. Results update automatically as new submissions arrive.</p></div>}
         {view !== "breakdown" ? null : <>
         <section className="result-total-strip">
@@ -2288,7 +2287,7 @@ function ResultsCenter({ incidents, parties = [], officers = [], mapLayers = [],
               <thead><tr><th>LGA</th><th>Ward</th><th>Polling unit</th>{summary.partyNames.map(party => <th key={party}>{party}</th>)}<th>Location</th><th>Evidence</th><th>Uploaded</th></tr></thead>
               <tbody>
                 {summary.rows.map((row) => (
-                  <tr key={row.id}><td>{row.lga || "â€”"}</td><td>{row.ward || "â€”"}</td><td><b>{row.pollingUnit || "â€”"}</b></td>{summary.partyNames.map(party => <td key={party}><strong>{Number(row.results.find(item => item.party === party)?.votes || 0).toLocaleString()}</strong></td>)}<td>{Number(row.lat).toFixed(5)}, {Number(row.lng).toFixed(5)}</td><td><div className="result-evidence">{(row.media || []).filter((item) => item.type === "image").slice(0, 2).map((item, index) => <a href={item.data} target="_blank" rel="noreferrer" key={`${row.id}-${index}`}><img src={item.data} alt={`Evidence for ${row.pollingUnit}`} /></a>)}</div></td><td>{new Date(row.createdAt).toLocaleString()}</td></tr>
+                  <tr key={row.id}><td>{row.lga || "—"}</td><td>{row.ward || "—"}</td><td><b>{row.pollingUnit || "—"}</b></td>{summary.partyNames.map(party => <td key={party}><strong>{Number(row.results.find(item => item.party === party)?.votes || 0).toLocaleString()}</strong></td>)}<td>{Number(row.lat).toFixed(5)}, {Number(row.lng).toFixed(5)}</td><td><div className="result-evidence">{(row.media || []).filter((item) => item.type === "image").slice(0, 2).map((item, index) => <a href={item.data} target="_blank" rel="noreferrer" key={`${row.id}-${index}`}><img src={item.data} alt={`Evidence for ${row.pollingUnit}`} /></a>)}</div></td><td>{new Date(row.createdAt).toLocaleString()}</td></tr>
                 ))}
                 {!summary.rows.length && <tr><td className="result-empty" colSpan={summary.partyNames.length + 7}>No polling-unit results have been uploaded yet.</td></tr>}
               </tbody>
@@ -2379,7 +2378,6 @@ function Dashboard({ session, onLogout, onSessionUpdate }) {
   const [chatRooms, setChatRooms] = useState([]);
   const [activeRoom, setActiveRoom] = useState(null);
   const [chatMessages, setChatMessages] = useState([]);
-  const [installPrompt, setInstallPrompt] = useState(null);
   const [updateReady, setUpdateReady] = useState(false);
   const [mapMenu, setMapMenu] = useState("");
   const [sidebarWidth, setSidebarWidth] = useState(
@@ -2535,11 +2533,6 @@ function Dashboard({ session, onLogout, onSessionUpdate }) {
     activeRoomRef.current = activeRoom;
   }, [activeRoom]);
   useEffect(() => {
-    const beforeInstall = (event) => {
-      event.preventDefault();
-      setInstallPrompt(event);
-    };
-    window.addEventListener("beforeinstallprompt", beforeInstall);
     navigator.serviceWorker?.ready
       .then((reg) => {
         if (reg.waiting) setUpdateReady(true);
@@ -2555,8 +2548,6 @@ function Dashboard({ session, onLogout, onSessionUpdate }) {
         });
       })
       .catch(() => {});
-    return () =>
-      window.removeEventListener("beforeinstallprompt", beforeInstall);
   }, []);
   useEffect(() => {
     Promise.all([
@@ -2639,7 +2630,6 @@ function Dashboard({ session, onLogout, onSessionUpdate }) {
         const iceServers = Array.isArray(result?.iceServers) && result.iceServers.length
           ? result.iceServers
           : fallbackIceServers;
-        console.info(`[camera] ICE provider: ${provider}${region ? ` (${region})` : ""}`);
         setTurnStatus({ provider, region, route: provider === "metered" ? "ready" : "fallback" });
         return { iceServers, provider, region };
       })
@@ -3387,18 +3377,6 @@ function Dashboard({ session, onLogout, onSessionUpdate }) {
     setProfileMenuOpen(false);
     setNotice("Profile updated");
   };
-  const installApp = async () => {
-    if (!installPrompt) {
-      setNotice(
-        "If Install is not available yet, use your browser menu: Add to Home screen / Install app.",
-      );
-      setTimeout(() => setNotice(""), 3500);
-      return;
-    }
-    installPrompt.prompt();
-    await installPrompt.userChoice.catch(() => {});
-    setInstallPrompt(null);
-  };
   const refreshApp = async () => {
     const reg = await navigator.serviceWorker?.getRegistration();
     await reg?.update();
@@ -3541,7 +3519,7 @@ function Dashboard({ session, onLogout, onSessionUpdate }) {
     setAreaSearchResult(result);
   };
   const areaSearchText = (result) => [
-    `Area search â€” ${new Date(result.createdAt).toLocaleString()}`,
+    `Area search — ${new Date(result.createdAt).toLocaleString()}`,
     `Agents: ${result.agents.length}`,
     `Polling units: ${result.pollingUnits.length}`,
     `Incidents: ${result.incidents.length}`,
@@ -3562,7 +3540,7 @@ function Dashboard({ session, onLogout, onSessionUpdate }) {
       if (navigator.share) await navigator.share({ title: "Election monitoring area search", text });
       else {
         await navigator.clipboard.writeText(text);
-        setNotice("Search result copied â€” paste it into your messaging app");
+        setNotice("Search result copied — paste it into your messaging app");
       }
     } catch (error) {
       if (error.name !== "AbortError") setNotice("Could not share this search result");
@@ -3594,7 +3572,7 @@ function Dashboard({ session, onLogout, onSessionUpdate }) {
     setNotice("Acquiring GPS fix...");
     gpsBestRef.current = null;
 
-    // Accuracy thresholds â€” only accept fixes within these bounds
+    // Accuracy thresholds — only accept fixes within these bounds
     const ACCURACY_GOOD = 25;
     const ACCURACY_MAX = 150;
     const BROADCAST_INTERVAL = 4000;
@@ -3607,7 +3585,7 @@ function Dashboard({ session, onLogout, onSessionUpdate }) {
       const fixAge = Date.now() - Number(position.timestamp || Date.now());
       if (!Number.isFinite(latitude) || !Number.isFinite(longitude) || !Number.isFinite(accuracy)) return;
       if (accuracy > ACCURACY_MAX || fixAge > 15000) {
-        setNotice(`Waiting for accurate GPSâ€¦ current accuracy Â±${Math.round(accuracy || 0)} m`);
+        setNotice(`Waiting for accurate GPS… current accuracy ±${Math.round(accuracy || 0)} m`);
         return;
       }
 
@@ -3621,7 +3599,7 @@ function Dashboard({ session, onLogout, onSessionUpdate }) {
         const impliedSpeed = distance / elapsedSeconds;
         const jumpAllowance = Math.max(80, accuracy * 3, Number(prev.accuracy || 0) * 3);
         if (distance > jumpAllowance && impliedSpeed > 75 && accuracy >= Number(prev.accuracy || accuracy)) {
-          setNotice("Ignoring an inaccurate GPS jump; checking againâ€¦");
+          setNotice("Ignoring an inaccurate GPS jump; checking again…");
           return;
         }
         if (distance <= jumpAllowance) {
@@ -3648,12 +3626,12 @@ function Dashboard({ session, onLogout, onSessionUpdate }) {
       // unless the fix is already very good
       const isGood = accuracy <= ACCURACY_GOOD;
       if (warmUpCount < 3 && !isGood) {
-        setNotice(`GPS warming upâ€¦ accuracy Â±${Math.round(accuracy)} m`);
+        setNotice(`GPS warming up… accuracy ±${Math.round(accuracy)} m`);
         return;
       }
 
       const best = gpsBestRef.current;
-      // Throttle broadcasts â€” don't flood the server
+      // Throttle broadcasts — don't flood the server
       if (now - lastBroadcast < BROADCAST_INTERVAL && !isGood) return;
       lastBroadcast = now;
 
@@ -3674,9 +3652,9 @@ function Dashboard({ session, onLogout, onSessionUpdate }) {
       }));
 
       const accuracyLabel = best.accuracy <= ACCURACY_GOOD
-        ? `Â±${Math.round(best.accuracy)} m (good)`
-        : `Â±${Math.round(best.accuracy)} m`;
-      setNotice(`GPS live â€” ${accuracyLabel}`);
+        ? `±${Math.round(best.accuracy)} m (good)`
+        : `±${Math.round(best.accuracy)} m`;
+      setNotice(`GPS live — ${accuracyLabel}`);
       setTimeout(() => setNotice(""), 4000);
     };
 
@@ -3688,8 +3666,8 @@ function Dashboard({ session, onLogout, onSessionUpdate }) {
       setSharingGps(false);
       if (isAgent) setGpsRequiredBlocked(true);
       setNotice(error.code === 1
-        ? "Location permission was denied â€” enable location in your browser settings and try again"
-        : "A valid location could not be obtained â€” check GPS and try again");
+        ? "Location permission was denied — enable location in your browser settings and try again"
+        : "A valid location could not be obtained — check GPS and try again");
     };
 
     gpsWatchRef.current = navigator.geolocation.watchPosition(
@@ -3717,7 +3695,7 @@ function Dashboard({ session, onLogout, onSessionUpdate }) {
     // Use the best GPS fix we already have if it's recent (< 10 s old)
     const best = gpsBestRef.current;
     if (best && (Date.now() - new Date(best.timestamp).getTime()) < 10000) {
-      flyToPoint(best, `Centered on your location Â±${Math.round(best.accuracy)} m`);
+      flyToPoint(best, `Centered on your location ±${Math.round(best.accuracy)} m`);
       return;
     }
     if (navigator.geolocation) {
@@ -3726,7 +3704,7 @@ function Dashboard({ session, onLogout, onSessionUpdate }) {
           flyToPoint({
             lat: position.coords.latitude,
             lng: position.coords.longitude,
-          }, `Centered on your location Â±${Math.round(position.coords.accuracy)} m`),
+          }, `Centered on your location ±${Math.round(position.coords.accuracy)} m`),
         () =>
           flyToPoint(
             gpsPositions[session.user.id] || session.user,
@@ -4231,7 +4209,7 @@ function Dashboard({ session, onLogout, onSessionUpdate }) {
     wakeLockRef.current?.release().catch(() => {});
     wakeLockRef.current = null;
   };
-  // Silent audio context trick â€” keeps JS alive in browsers that throttle hidden tabs
+  // Silent audio context trick — keeps JS alive in browsers that throttle hidden tabs
   const startSilentAudio = () => {
     if (silentAudioRef.current) return;
     try {
@@ -5326,16 +5304,16 @@ function Dashboard({ session, onLogout, onSessionUpdate }) {
                       .filter((u) => u.role === "Response Team")
                       .map((u) => (
                         <option key={u.id} value={u.id}>
-                          {u.name}{u.station ? ` Â· ${u.station}` : ""}
+                          {u.name}{u.station ? ` · ${u.station}` : ""}
                         </option>
                       ))}
                     {users.filter((u) => u.role === "Agent").length > 0 && (
-                      <optgroup label="â”€â”€ Agents â”€â”€">
+                      <optgroup label="── Agents ──">
                         {users
                           .filter((u) => u.role === "Agent")
                           .map((u) => (
                             <option key={u.id} value={u.id}>
-                              {u.name}{u.pollingUnit ? ` Â· ${u.pollingUnit}` : ""}
+                              {u.name}{u.pollingUnit ? ` · ${u.pollingUnit}` : ""}
                             </option>
                           ))}
                       </optgroup>
@@ -5474,14 +5452,16 @@ function Dashboard({ session, onLogout, onSessionUpdate }) {
         </div>
       )}
       {newPoint && (
-        <IncidentForm
-          point={newPoint}
-          users={reportUsers}
-          onClose={() => setNewPoint(null)}
-          onSave={save}
-          isAdmin={canCreateCustomReportType}
-          currentUser={session.user}
-        />
+        <Suspense fallback={<div className="modal-backdrop"><div className="modal">Loading report form…</div></div>}>
+          <IncidentForm
+            point={newPoint}
+            users={reportUsers}
+            onClose={() => setNewPoint(null)}
+            onSave={save}
+            isAdmin={canCreateCustomReportType}
+            currentUser={session.user}
+          />
+        </Suspense>
       )}
       {pendingAreaAction && (
         <div className="modal-backdrop">
@@ -5513,7 +5493,7 @@ function Dashboard({ session, onLogout, onSessionUpdate }) {
             </div>
             {(areaSearchResult.radius || areaSearchResult.pollingUnits.length > 0) && (
               <div className="area-search-detail">
-                {areaSearchResult.radius && <p>Radius: <b>{formatDistance(areaSearchResult.radius)}</b> Â· Diameter: <b>{formatDistance(areaSearchResult.diameter)}</b></p>}
+                {areaSearchResult.radius && <p>Radius: <b>{formatDistance(areaSearchResult.radius)}</b> · Diameter: <b>{formatDistance(areaSearchResult.diameter)}</b></p>}
                 {areaSearchResult.pollingUnits.length > 0 && <p>Polling units: <b>{areaSearchResult.pollingUnits.join(", ")}</b></p>}
               </div>
             )}
@@ -5524,7 +5504,7 @@ function Dashboard({ session, onLogout, onSessionUpdate }) {
           </section>
         </div>
       )}
-      {newResultPoint && <PollingResultForm user={session.user} point={newResultPoint} parties={parties} onClose={() => setNewResultPoint(null)} onSave={savePollingResult} />}
+      {newResultPoint && <Suspense fallback={<div className="modal-backdrop"><div className="modal">Loading result form…</div></div>}><PollingResultForm user={session.user} point={newResultPoint} parties={parties} onClose={() => setNewResultPoint(null)} onSave={savePollingResult} /></Suspense>}
       {profileOpen && <ProfileModal session={session} onClose={() => setProfileOpen(false)} onSave={saveProfile} />}
       {ipLogOpen && canAdmin && (
         <div className="modal-backdrop" onClick={() => setIpLogOpen(false)}>
@@ -5585,7 +5565,7 @@ function Dashboard({ session, onLogout, onSessionUpdate }) {
         </div>
       )}
       {gpsRequiredBlocked && isAgent && <div className="modal-backdrop gps-required-gate"><div className="modal"><span className="eyebrow">LOCATION REQUIRED</span><h2>Allow Location</h2><p>Location sharing is mandatory for Agent accounts. The app will remain locked until you allow access and a valid location is received.</p><button className="primary wide" onClick={toggleGps} disabled={sharingGps}><LuLocateFixed /> {sharingGps ? "Waiting for Location…" : "Allow Location"}</button></div></div>}
-      {partyManagerOpen && canAdmin && <PartyManager parties={parties} onClose={() => setPartyManagerOpen(false)} onSave={saveParties} />}
+      {partyManagerOpen && canAdmin && <Suspense fallback={<div className="modal-backdrop"><div className="modal">Loading party manager…</div></div>}><PartyManager parties={parties} onClose={() => setPartyManagerOpen(false)} onSave={saveParties} /></Suspense>}
       {emergencyOpen && (
         <DashboardEmergencyPanel
           onClose={() => setEmergencyOpen(false)}
@@ -5593,30 +5573,34 @@ function Dashboard({ session, onLogout, onSessionUpdate }) {
         />
       )}
       {manageOfficers && (
-        <OfficerManager
-          users={users}
-          currentUser={session.user}
-          onClose={() => setManageOfficers(false)}
-          onCreate={createOfficer}
-          onUpdate={updateOfficer}
-          onDelete={deleteOfficer}
-          onPassword={updateUserPassword}
-          onRoleChange={changeUserRole}
-        />
+        <Suspense fallback={<div className="modal-backdrop"><div className="modal">Loading personnel manager…</div></div>}>
+          <OfficerManager
+            users={users}
+            currentUser={session.user}
+            onClose={() => setManageOfficers(false)}
+            onCreate={createOfficer}
+            onUpdate={updateOfficer}
+            onDelete={deleteOfficer}
+            onPassword={updateUserPassword}
+            onRoleChange={changeUserRole}
+          />
+        </Suspense>
       )}
       {cameraPanel && (
-        <DashboardCameraPanel
-          cameras={cameras}
-          phoneShares={phoneShares}
-          remoteStreams={remoteStreams}
-          turnStatus={turnStatus}
-          isAdmin={canAdmin}
-          onClose={() => setCameraPanel(false)}
-          onCreate={createCamera}
-          onDelete={deleteCamera}
-          onView={viewPhoneCamera}
-          onShowMap={showCameraOnMap}
-        />
+        <Suspense fallback={<div className="modal-backdrop"><div className="modal">Loading camera panel…</div></div>}>
+          <DashboardCameraPanel
+            cameras={cameras}
+            phoneShares={phoneShares}
+            remoteStreams={remoteStreams}
+            turnStatus={turnStatus}
+            isAdmin={canAdmin}
+            onClose={() => setCameraPanel(false)}
+            onCreate={createCamera}
+            onDelete={deleteCamera}
+            onView={viewPhoneCamera}
+            onShowMap={showCameraOnMap}
+          />
+        </Suspense>
       )}
       {mapDataPanel && (
         <DashboardMapDataPanel

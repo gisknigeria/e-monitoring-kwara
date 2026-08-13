@@ -1,6 +1,8 @@
 ﻿import { useState } from "react";
 import Login from "./components/auth/Login.jsx";
-import Dashboard from "./components/dashboard/Dashboard.jsx";
+import { lazy, Suspense } from "react";
+
+const Dashboard = lazy(() => import("./components/dashboard/Dashboard.jsx"));
 
 const API = "/api";
 
@@ -43,7 +45,9 @@ export default function App() {
   };
 
   return session ? (
-    <Dashboard session={session} onLogout={logout} onSessionUpdate={updateSession} />
+    <Suspense fallback={<div className="app-loading" role="status"><span></span><b>Loading command center…</b></div>}>
+      <Dashboard session={session} onLogout={logout} onSessionUpdate={updateSession} />
+    </Suspense>
   ) : (
     <Login onLogin={login} />
   );

@@ -1,4 +1,4 @@
-const CACHE_NAME = 'election-monitor-command-v7-official-pdp-logo';
+const CACHE_NAME = 'election-monitor-command-v9-console-cleanup';
 const APP_SHELL = ['/', '/manifest.webmanifest', '/pdp-logo.png', '/icons/icon-192.png', '/icons/icon-512.png', '/icons/maskable-192.png', '/icons/maskable-512.png', '/icons/apple-touch-icon.png', '/icons/favicon-32.png'];
 
 self.addEventListener('install', event => {
