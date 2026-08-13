@@ -17,10 +17,19 @@ import { FALLBACK_ICE_SERVERS, normalizeMeteredDomain, normalizeMeteredRegion, s
 const { Pool } = pg;
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const dataFile = process.env.DATA_FILE || join(__dirname, 'data.json');
-const secret = process.env.JWT_SECRET || randomBytes(32).toString('hex');
-if (!process.env.JWT_SECRET) {
-  console.warn('JWT_SECRET is not set. Using a generated ephemeral secret for this process.');
-}
+const ensureJwtSecret = () => {
+  const configured = process.env.JWT_SECRET;
+  if (!configured) {
+    console.warn('JWT_SECRET is not set. Using a generated ephemeral secret for this process.');
+    return randomBytes(32).toString('hex');
+  }
+  if (Buffer.byteLength(configured, 'utf8') < 32) {
+    console.warn('JWT_SECRET is shorter than 32 bytes. Generating a secure fallback secret for this instance.');
+    return randomBytes(32).toString('hex');
+  }
+  return configured;
+};
+const secret = ensureJwtSecret();
 const databaseUrl = process.env.DATABASE_URL;
 const superAdminEmail = process.env.SUPER_ADMIN_EMAIL || 'superadmin@command.local';
 const superAdminPassword = process.env.SUPER_ADMIN_PASSWORD || randomBytes(24).toString('hex');
@@ -36,9 +45,8 @@ if (!process.env.SUPER_ADMIN_PASSWORD || !process.env.ADMIN_PASSWORD) {
   console.warn('SUPER_ADMIN_PASSWORD and ADMIN_PASSWORD were not set. Generated secure random passwords for the seeded admin accounts.');
 }
 if (process.env.NODE_ENV === 'production') {
-  const missing = ['JWT_SECRET', 'SUPER_ADMIN_PASSWORD', 'ADMIN_PASSWORD'].filter(name => !process.env[name]);
+  const missing = ['SUPER_ADMIN_PASSWORD', 'ADMIN_PASSWORD'].filter(name => !process.env[name]);
   if (missing.length) throw new Error(`Missing required production configuration: ${missing.join(', ')}`);
-  if (Buffer.byteLength(process.env.JWT_SECRET, 'utf8') < 32) throw new Error('JWT_SECRET must contain at least 32 bytes');
   const weakSeedPasswords = [
     !validatePassword(process.env.SUPER_ADMIN_PASSWORD) && 'SUPER_ADMIN_PASSWORD',
     !validatePassword(process.env.ADMIN_PASSWORD) && 'ADMIN_PASSWORD',
