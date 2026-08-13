@@ -90,9 +90,7 @@ import {
   getRegistrationLocationOptions,
 } from "../../../shared/electionData.js";
 
-import MapCanvas from "./MapCanvas.jsx";
 import ProfileModal from "./ProfileModal.jsx";
-import ResultsDashboard from "./ResultsDashboard.jsx";
 import DashboardCameraPanel from "./CameraPanel.jsx";
 import DashboardChatPanel from "./ChatPanel.jsx";
 import DashboardEmergencyPanel from "./EmergencyPanel.jsx";
@@ -4541,7 +4539,7 @@ function Dashboard({ session, onLogout, onSessionUpdate }) {
               <img className="sidebar-logo" src="/pdp-logo.png" alt="Peoples Democratic Party logo" />
               <div>
                 <b>Election Monitoring</b>
-                <span>Command Center â€¢ Kwara</span>
+                <span>Command Center • Kwara</span>
               </div>
             </div>
             <button
@@ -4704,7 +4702,7 @@ function Dashboard({ session, onLogout, onSessionUpdate }) {
                   })}
                 >
                   <h3>Users</h3>
-                  <span>{situationalOpen ? "âˆ’" : "+"}</span>
+                  <span>{situationalOpen ? "−" : "+"}</span>
                 </button>
                 {situationalOpen && (
                   <div className="sidebar-dropdown-body">
@@ -4735,7 +4733,7 @@ function Dashboard({ session, onLogout, onSessionUpdate }) {
                   })}
                 >
                   <h2>Live Incidence <em>{incidents.length}</em></h2>
-                  <span>{liveIncidentsOpen ? "âˆ’" : "+"}</span>
+                  <span>{liveIncidentsOpen ? "−" : "+"}</span>
                 </button>
                 {liveIncidentsOpen && (
                   <div className="sidebar-dropdown-body">
@@ -5066,7 +5064,7 @@ function Dashboard({ session, onLogout, onSessionUpdate }) {
           <img className="agent-brand-logo" src="/pdp-logo.png" alt="Peoples Democratic Party logo" />
           <span className="eyebrow">FIELD REPORTING</span>
           <h1>{session.user.pollingUnit || "Polling unit agent"}</h1>
-          <p>{[session.user.lga, session.user.ward].filter(Boolean).join(" â€¢ ")}</p>
+          <p>{[session.user.lga, session.user.ward].filter(Boolean).join(" • ")}</p>
           <div className="agent-action-grid">
             <button className="agent-action-card result" onClick={openPollingUnitResultForm}>
               <ReportIcon iconKey="POI" size={22} />
@@ -5091,7 +5089,7 @@ function Dashboard({ session, onLogout, onSessionUpdate }) {
           </div>
           <button className="agent-logout" onClick={onLogout}><FaSignOutAlt /> Logout</button>
         </div>}
-        {!isAgent && <MapCanvas
+        {!isAgent && <MapView
           incidents={mapVisibleIncidents}
           officers={officers}
           cameras={mapCameras}
@@ -5323,7 +5321,7 @@ function Dashboard({ session, onLogout, onSessionUpdate }) {
                       setSelected(item);
                     }}
                   >
-                    <option value="">â€” Unassigned â€”</option>
+                    <option value="">— Unassigned —</option>
                     {users
                       .filter((u) => u.role === "Response Team")
                       .map((u) => (
@@ -5446,7 +5444,7 @@ function Dashboard({ session, onLogout, onSessionUpdate }) {
           )}
         </section>
       )}
-      {resultsOpen && <ResultsDashboard incidents={incidents} parties={parties} officers={officers} mapLayers={mapLayers} selected={selected} onClose={() => setResultsOpen(false)} authToken={session.token} initialFocusParty={partyMapAnalysis?.party || ""} onPartyMapChange={setPartyMapAnalysis} onTool={runAnalyticTool} onCsv={importCsvPoints} onClear={clearMapTools} />}
+      {resultsOpen && <ResultsCenter incidents={incidents} parties={parties} officers={officers} mapLayers={mapLayers} selected={selected} onClose={() => setResultsOpen(false)} authToken={session.token} initialFocusParty={partyMapAnalysis?.party || ""} onPartyMapChange={setPartyMapAnalysis} onTool={runAnalyticTool} onCsv={importCsvPoints} onClear={clearMapTools} />}
       {activeEmergency && (
         <div className="emergency-alert-card">
           <b>Emergency from {activeEmergency.name}</b>
@@ -5550,7 +5548,7 @@ function Dashboard({ session, onLogout, onSessionUpdate }) {
               </button>
             </div>
             {ipLogLoading ? (
-              <div className="ip-log-empty">Loadingâ€¦</div>
+              <div className="ip-log-empty">Loading…</div>
             ) : ipLogData.filter(e => ipLogFilter === "all" || e.type === ipLogFilter).length === 0 ? (
               <div className="ip-log-empty">No entries yet.</div>
             ) : (
@@ -5586,7 +5584,7 @@ function Dashboard({ session, onLogout, onSessionUpdate }) {
           </div>
         </div>
       )}
-      {gpsRequiredBlocked && isAgent && <div className="modal-backdrop gps-required-gate"><div className="modal"><span className="eyebrow">LOCATION REQUIRED</span><h2>Allow Location</h2><p>Location sharing is mandatory for Agent accounts. The app will remain locked until you allow access and a valid location is received.</p><button className="primary wide" onClick={toggleGps} disabled={sharingGps}><LuLocateFixed /> {sharingGps ? "Waiting for Locationâ€¦" : "Allow Location"}</button></div></div>}
+      {gpsRequiredBlocked && isAgent && <div className="modal-backdrop gps-required-gate"><div className="modal"><span className="eyebrow">LOCATION REQUIRED</span><h2>Allow Location</h2><p>Location sharing is mandatory for Agent accounts. The app will remain locked until you allow access and a valid location is received.</p><button className="primary wide" onClick={toggleGps} disabled={sharingGps}><LuLocateFixed /> {sharingGps ? "Waiting for Location…" : "Allow Location"}</button></div></div>}
       {partyManagerOpen && canAdmin && <PartyManager parties={parties} onClose={() => setPartyManagerOpen(false)} onSave={saveParties} />}
       {emergencyOpen && (
         <DashboardEmergencyPanel

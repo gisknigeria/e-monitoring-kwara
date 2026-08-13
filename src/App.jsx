@@ -18,8 +18,10 @@ export default function App() {
 
   const login = (value, rememberMe = true) => {
     const sessionValue = JSON.stringify(value);
-    localStorage.setItem("command-session", sessionValue);
-    sessionStorage.removeItem("command-session");
+    const storage = rememberMe ? localStorage : sessionStorage;
+    const staleStorage = rememberMe ? sessionStorage : localStorage;
+    storage.setItem("command-session", sessionValue);
+    staleStorage.removeItem("command-session");
     setSession(value);
   };
 
