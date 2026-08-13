@@ -52,7 +52,7 @@ import {
   STATE_CODE_TO_NAME,
   normalizeRegistrationState,
   getRegistrationLocationOptions,
-} from "../../shared/electionData.js";
+} from "../../../shared/electionData.js";
 
 const severityColor = {
   Low: "#38bdf8",
