@@ -1440,3 +1440,17 @@ body.resizing-sidebar{cursor:col-resize;user-select:none}
   .officer-form-grid { grid-template-columns: 1fr; }
   .personnel-tabs button { flex: 1; padding-inline: 8px; }
 }
+
+.irev-party-results { display: grid; gap: 8px; }
+.irev-party-results > div { display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 10px 12px; border: 1px solid #31547c; border-radius: 8px; background: #0a203b; }
+.irev-party-results strong { color: #dbeafe !important; font-size: 13px !important; }
+.irev-party-results b { color: #fff !important; font-size: 18px !important; }
+.irev-preview-modal { overflow-y: auto; }
+.irev-preview-body { overflow-y: auto; }
+.irev-preview-image { min-height: 0; overflow: visible; }
+.irev-preview-body aside { overflow: visible; }
+.irev-sub-tabs { align-items: center; margin: 0 20px 14px; }
+.irev-sub-tabs > span { margin-left: auto; color: #93c5fd !important; font-size: 10px !important; }
+.irev-result-totals { padding: 0 20px 16px; }
+.irev-results-table { width: 100%; min-width: 0 !important; table-layout: fixed; }
+.irev-results-table th, .irev-results-table td { white-space: normal !important; overflow-wrap: anywhere; }

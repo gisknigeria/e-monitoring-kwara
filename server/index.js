@@ -825,6 +825,7 @@ const IREV_OSUN_ELECTION_ID = '6a7f788adcbc755a763f082a';
 const IREV_OSUN_PORTAL_URL = `https://irev.inecnigeria.org/elections/${IREV_OSUN_ELECTION_ID}`;
 const IREV_IMAGE_HOSTS = new Set(['inc-s3-cache.incportals.com', 'etransmission-result-docs.s3.eu-west-2.amazonaws.com']);
 let irevOsunCache = null;
+const irevOcrCache = new Map();
 const isTrustedIrevImage = value => {
   try {
     const url = new URL(String(value || ''));
@@ -893,7 +894,7 @@ app.get('/api/irev/osun', auth, rateLimit, asyncRoute(async (req, res) => {
   try {
     const data = await loadOsunIrevPilot(req.query.refresh === '1' && isAdminRole(req.user));
     res.set('Cache-Control', 'private, no-store');
-    return res.json(data);
+    return res.json({ ...data, uploads: data.uploads.map(upload => ({ ...upload, extraction: irevOcrCache.get(upload.id) || null })) });
   } catch (error) {
     console.error('[irev] Osun pilot fetch failed:', error.message);
     return res.status(503).json({ message: 'The official IReV feed is temporarily unavailable.' });
@@ -904,7 +905,8 @@ app.post('/api/irev/osun/ocr', auth, adminOnly, rateLimit, asyncRoute(async (req
   const pilot = await loadOsunIrevPilot();
   const upload = pilot.uploads.find(item => item.id === uploadId);
   if (!upload) return res.status(404).json({ message: 'IReV upload not found in the recent official feed.' });
-  const prompt = `Transcribe this Nigerian INEC polling-unit result sheet carefully. This is an OCR assistance task, not a declaration of an election result. Return plain text with: polling-unit code, polling-unit name, each visible party abbreviation and score, rejected ballots, total valid votes, total votes cast, and any fields that are unclear. Use [unclear] instead of guessing. End with CONFIDENCE: low, medium, or high. The source metadata says PU ${upload.puCode}, ${upload.pollingUnit}, ${upload.ward}, ${upload.lga}.`;
+  if (irevOcrCache.has(uploadId)) return res.json(irevOcrCache.get(uploadId));
+  const prompt = `Read only the political-party vote table on this Nigerian INEC polling-unit result sheet. Return ONLY a JSON array in this exact shape: [{"party":"APC","votes":123}]. Include every clearly readable party abbreviation and its vote count. Do not include headings, polling-unit details, totals, explanations, markdown, confidence, analysis, or reasoning. Do not guess unclear values. The source metadata is PU ${upload.puCode}, ${upload.pollingUnit}, ${upload.ward}, ${upload.lga}.`;
   let text = '';
   let provider = '';
   let model = '';
@@ -918,7 +920,7 @@ app.post('/api/irev/osun/ocr', auth, adminOnly, rateLimit, asyncRoute(async (req
         model,
         messages: [{ role: 'user', content: [{ type: 'text', text: prompt }, { type: 'image_url', image_url: { url: upload.imageUrl } }] }],
         temperature: 0,
-        max_completion_tokens: 1200,
+        max_completion_tokens: 700,
       }),
     });
     const body = await response.json().catch(() => ({}));
@@ -954,9 +956,23 @@ app.post('/api/irev/osun/ocr', auth, adminOnly, rateLimit, asyncRoute(async (req
   } else {
     return res.status(503).json({ message: 'Configure GROQ_API_KEY, GEMINI_API_KEY, or OPENAI_API_KEY to enable image-to-text extraction.' });
   }
-  const draft = sanitizeString(text).slice(0, 6000);
-  if (!draft) return res.status(502).json({ message: 'No readable text was extracted from this image.' });
-  return res.json({ uploadId, draft, provider, model, verificationStatus: 'AI draft — human verification required', sourceUrl: upload.imageUrl, extractedAt: new Date().toISOString() });
+  const visibleText = String(text || '').replace(/<think>[\s\S]*?<\/think>/gi, '').replace(/```(?:json)?|```/gi, '').trim();
+  const arrayMatch = visibleText.match(/\[[\s\S]*\]/);
+  let parsed = [];
+  if (arrayMatch) {
+    try { parsed = JSON.parse(arrayMatch[0]); } catch { parsed = []; }
+  }
+  const results = (Array.isArray(parsed) ? parsed : [])
+    .map(item => ({
+      party: sanitizeString(item?.party || '').replace(/[^A-Za-z0-9 .&-]/g, '').trim().toUpperCase().slice(0, 40),
+      votes: Number(item?.votes),
+    }))
+    .filter(item => item.party && Number.isInteger(item.votes) && item.votes >= 0 && item.votes <= 100000)
+    .reduce((unique, item) => unique.some(existing => existing.party === item.party) ? unique : [...unique, item], []);
+  if (!results.length) return res.status(502).json({ message: 'No readable party vote counts were extracted from this image.' });
+  const extraction = { uploadId, results, provider, model, sourceUrl: upload.imageUrl, extractedAt: new Date().toISOString() };
+  irevOcrCache.set(uploadId, extraction);
+  return res.json(extraction);
 }));
 app.use(['/api/news/summary', '/api/analysis/ai'], (req, _res, next) => { console.log(`[ai] request=${req.path} geminiConfigured=${Boolean(process.env.GEMINI_API_KEY)} model=${process.env.GEMINI_MODEL || 'gemini-2.0-flash'}`); next(); });
 app.get('/api/ai/status', auth, adminOnly, rateLimit, (_, res) => {
