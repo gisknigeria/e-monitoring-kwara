@@ -544,7 +544,7 @@ const openAiFallbackModel = process.env.OPENAI_FALLBACK_MODEL || 'gpt-5.6-luna';
 const groqPrimaryModel = process.env.GROQ_MODEL || 'openai/gpt-oss-20b';
 const groqFallbackModel = process.env.GROQ_FALLBACK_MODEL || 'openai/gpt-oss-20b';
 const groqNewsModel = process.env.GROQ_NEWS_MODEL || 'groq/compound-mini';
-const groqVisionModel = process.env.GROQ_VISION_MODEL || 'qwen/qwen3.6-27b';
+const geminiVisionModel = process.env.GEMINI_VISION_MODEL || 'gemini-3.5-flash-lite';
 const groqApiKeys = [...new Set([
   process.env.GROQ_API_KEY,
   process.env.GROQ_API_KEY_2,
@@ -944,7 +944,7 @@ const ensureIrevArchiveLoaded = () => {
     }
     const savedExtractions = Object.entries(extractions || {});
     const supportedExtractions = savedExtractions.filter(([, extraction]) =>
-      ['gemini', 'groq'].includes(String(extraction?.provider || '').trim().toLowerCase())
+      String(extraction?.provider || '').trim().toLowerCase() === 'gemini'
       && Array.isArray(extraction?.results),
     );
     for (const [id, extraction] of supportedExtractions) {
@@ -1082,28 +1082,52 @@ app.post('/api/irev/osun/ocr', auth, adminOnly, irevOcrRateLimit, asyncRoute(asy
   } catch {
     return res.status(415).json({ code: 'OCR_IMAGE_FORMAT', message: 'This file is not a valid result-sheet image.' });
   }
-  if (!groqApiKeys.length) return res.status(503).json({ code: 'AI_NOT_CONFIGURED', message: 'Groq is not configured. Saved IReV results remain available.' });
+  if (!process.env.GEMINI_API_KEY) return res.status(503).json({ code: 'AI_NOT_CONFIGURED', message: 'Gemini is not configured. Polling-unit uploads remain available.' });
   let body;
   try {
     const optimizedImage = await optimizeIrevImage(imageBytes);
-    body = await callGroqApi({
-      model: groqVisionModel,
-      messages: [{ role: 'user', content: [
-        { type: 'text', text: 'Read only the political-party vote table in this Nigerian INEC result sheet. Return JSON exactly as {"results":[{"party":"ABC","votes":123}]}. Include every clearly readable party abbreviation and vote count. Do not include totals, explanations, headings, or uncertain guesses.' },
-        { type: 'image_url', image_url: { url: `data:image/jpeg;base64,${optimizedImage.toString('base64')}` } },
-      ] }],
-      temperature: 0,
-      max_completion_tokens: 350,
-      response_format: { type: 'json_object' },
+    const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(geminiVisionModel)}:generateContent?key=${encodeURIComponent(process.env.GEMINI_API_KEY)}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      signal: AbortSignal.timeout(35_000),
+      body: JSON.stringify({
+        contents: [{ parts: [
+          { text: 'Read only the political-party vote table in this Nigerian INEC result sheet. Return every clearly readable party abbreviation and its vote count. Do not include totals, explanations, headings, or uncertain guesses.' },
+          { inline_data: { mime_type: 'image/jpeg', data: optimizedImage.toString('base64') } },
+        ] }],
+        generationConfig: {
+          responseMimeType: 'application/json',
+          responseSchema: {
+            type: 'OBJECT',
+            properties: {
+              results: {
+                type: 'ARRAY',
+                items: {
+                  type: 'OBJECT',
+                  properties: { party: { type: 'STRING' }, votes: { type: 'INTEGER' } },
+                  required: ['party', 'votes'],
+                },
+              },
+            },
+            required: ['results'],
+          },
+        },
+      }),
     });
+    body = await response.json().catch(() => ({}));
+    if (!response.ok) {
+      const error = new Error(body?.error?.message || 'Gemini could not read this result sheet.');
+      error.status = response.status;
+      throw error;
+    }
   } catch (error) {
-    console.warn('[irev] Groq extraction unavailable:', error.status || '', error.message);
-    if (error.status === 429) return res.status(429).json({ code: 'AI_QUOTA_EXHAUSTED', message: 'All Groq keys are currently rate-limited. Saved results remain visible and extraction will resume automatically.' });
-    return res.status(503).json({ code: 'AI_SERVICE_UNAVAILABLE', message: 'Groq is temporarily unavailable. Saved IReV results remain visible.' });
+    console.warn('[irev] Gemini extraction unavailable:', error.status || '', error.message);
+    if (error.status === 429) return res.status(429).json({ code: 'AI_QUOTA_EXHAUSTED', message: 'Gemini extraction is paused because its quota is unavailable. Polling-unit uploads remain visible.' });
+    return res.status(503).json({ code: 'AI_SERVICE_UNAVAILABLE', message: 'Gemini is temporarily unavailable. Polling-unit uploads remain visible.' });
   }
   let parsed = [];
   try {
-    const responseText = body.choices?.[0]?.message?.content || '';
+    const responseText = body.candidates?.[0]?.content?.parts?.map(part => part.text || '').join('') || '';
     const decoded = JSON.parse(responseText.replace(/^```json\s*|\s*```$/gi, '').trim());
     parsed = Array.isArray(decoded) ? decoded : decoded?.results;
   } catch {
@@ -1114,7 +1138,7 @@ app.post('/api/irev/osun/ocr', auth, adminOnly, irevOcrRateLimit, asyncRoute(asy
     .filter(item => item.party && Number.isInteger(item.votes) && item.votes >= 0 && item.votes <= 5000)
     .reduce((unique, item) => unique.some(existing => existing.party === item.party) ? unique : [...unique, item], []);
   if (!results.length) return res.status(502).json({ message: 'No readable party vote counts were extracted from this image.' });
-  const extraction = { uploadId, results, provider: 'groq', model: groqVisionModel, sourceUrl: upload.imageUrl, extractedAt: new Date().toISOString() };
+  const extraction = { uploadId, results, provider: 'gemini', model: geminiVisionModel, sourceUrl: upload.imageUrl, extractedAt: new Date().toISOString() };
   irevOcrCache.set(uploadId, extraction);
   const persistenceTask = irevOcrPersistQueue.then(() => store.setSetting(IREV_OSUN_OCR_KEY, Object.fromEntries(irevOcrCache)));
   irevOcrPersistQueue = persistenceTask.catch(error => console.error('[irev] Could not persist OCR result:', error.message));

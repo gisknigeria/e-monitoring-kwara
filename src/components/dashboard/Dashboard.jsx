@@ -2246,8 +2246,8 @@ function ResultsCenter({ incidents, parties = [], officers = [], mapLayers = [],
       const pilot = await request(`/irev/osun${force ? "?refresh=1" : ""}`, authToken);
       setIrevPilot(pilot);
       setIrevDrafts((current) => ({
-        ...Object.fromEntries((pilot.uploads || []).filter((upload) => ["gemini", "groq"].includes(upload.extraction?.provider)).map((upload) => [upload.id, upload.extraction])),
-        ...Object.fromEntries(Object.entries(current).filter(([, extraction]) => ["gemini", "groq"].includes(extraction?.provider))),
+        ...Object.fromEntries((pilot.uploads || []).filter((upload) => upload.extraction?.provider === "gemini").map((upload) => [upload.id, upload.extraction])),
+        ...Object.fromEntries(Object.entries(current).filter(([, extraction]) => extraction?.provider === "gemini")),
       }));
       return pilot;
     } catch (error) {
@@ -2570,10 +2570,10 @@ function ResultsCenter({ incidents, parties = [], officers = [], mapLayers = [],
           {irevError && <div className="error">{irevError}</div>}
           {irevAiStoppedReason && <div className="irev-ai-stopped"><MdWarning /><div><strong>OCR status</strong><span>{irevAiStoppedReason}</span></div></div>}
           {irevPilot && <>
-            <section className="result-total-strip irev-result-totals">{irevTopParties.map((party) => <article className="result-total-card" key={party}><span>{party}</span><strong>{irevOnlyTotals[party].toLocaleString()}</strong></article>)}</section>
+            {irevSection === "results" && irevResultRows.length > 0 && <section className="result-total-strip irev-result-totals">{irevTopParties.map((party) => <article className="result-total-card" key={party}><span>{party}</span><strong>{irevOnlyTotals[party].toLocaleString()}</strong></article>)}</section>}
             <div className="irev-pilot-stats"><div><span>Uploaded</span><strong>{irevPilot.submitted.toLocaleString()}</strong></div><div><span>Expected</span><strong>{irevPilot.expected.toLocaleString()}</strong></div><div><span>Coverage</span><strong>{irevPilot.expected ? `${((irevPilot.submitted / irevPilot.expected) * 100).toFixed(1)}%` : "—"}</strong></div><div><span>Last checked</span><strong>{new Date(irevPilot.fetchedAt).toLocaleTimeString()}</strong></div></div>
             {irevPilot.notice && <p className="irev-verification-note"><MdWarning /> {irevPilot.notice}</p>}
-            <div className="wl-sub-tabs irev-sub-tabs"><button className={irevSection === "uploads" ? "wl-sub-tab active" : "wl-sub-tab"} onClick={() => setIrevSection("uploads")}>Polling-unit uploads</button><button className={irevSection === "results" ? "wl-sub-tab active" : "wl-sub-tab"} onClick={() => setIrevSection("results")}>Results</button>{irevExtractingIds.size > 0 && <span>Reading {irevExtractingIds.size} sheets in parallel… {irevResultRows.length.toLocaleString()} ready</span>}</div>
+            <div className="wl-sub-tabs irev-sub-tabs"><button className={irevSection === "uploads" ? "wl-sub-tab active" : "wl-sub-tab"} onClick={() => setIrevSection("uploads")}>Polling-unit uploads</button>{irevResultRows.length > 0 && <button className={irevSection === "results" ? "wl-sub-tab active" : "wl-sub-tab"} onClick={() => setIrevSection("results")}>Results</button>}{irevExtractingIds.size > 0 && <span>Reading {irevExtractingIds.size} sheets in parallel… {irevResultRows.length.toLocaleString()} ready</span>}</div>
             {irevSection === "uploads" && <>
             <div className="irev-table-toolbar"><div><strong>All uploaded polling units</strong><span>{filteredIrevUploads.length.toLocaleString()} of {irevPilot.uploads.length.toLocaleString()} sheets shown</span></div><label><FaSearch /><input value={irevSearch} onChange={(event) => setIrevSearch(event.target.value)} placeholder="Search LGA, ward, polling unit or PU code" />{irevSearch && <button type="button" onClick={() => setIrevSearch("")} aria-label="Clear IReV search"><FaTimes /></button>}</label></div>
             <div className="irev-table-scroll">
