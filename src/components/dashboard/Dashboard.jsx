@@ -6,6 +6,7 @@ import { io } from "socket.io-client";
 import {
   FaBullseye,
   FaCamera,
+  FaChartBar,
   FaCircle,
   FaComments,
   FaDrawPolygon,
@@ -2276,7 +2277,7 @@ function ResultsCenter({ incidents, parties = [], officers = [], mapLayers = [],
         </div>
         <button className="icon-btn" onClick={onClose} title="Close dashboard"><FaTimes /></button>
       </header>
-      <div className="rc-tab-bar"><button className={view === "action" ? "rc-tab active" : "rc-tab"} onClick={() => setView("action")}>Action</button><button className={view === "pulse" ? "rc-tab active" : "rc-tab"} onClick={() => setView("pulse")}>Pulse</button><button className={["breakdown", "winloss", "winloss-lga"].includes(view) ? "rc-tab active" : "rc-tab"} onClick={() => setView("breakdown")}>Result</button><button className={view === "news" ? "rc-tab active" : "rc-tab"} onClick={() => setView("news")}>News</button></div>
+      <div className="rc-tab-bar"><button className={view === "pulse" ? "rc-tab active" : "rc-tab"} onClick={() => setView("pulse")}>Pulse</button><button className={view === "action" ? "rc-tab active" : "rc-tab"} onClick={() => setView("action")}>Action</button><button className={["breakdown", "winloss", "winloss-lga"].includes(view) ? "rc-tab active" : "rc-tab"} onClick={() => setView("breakdown")}>Result</button><button className={view === "news" ? "rc-tab active" : "rc-tab"} onClick={() => setView("news")}>News</button></div>
       <main className="results-center-body">
         {view === "pulse" && <AnalyticsPanel incidents={incidents} officers={officers} mapLayers={mapLayers} selected={selected} onClose={onClose} onTool={onTool} onCsv={onCsv} onClear={onClear} embedded />}
         {["breakdown", "winloss", "winloss-lga"].includes(view) && <div className="wl-sub-tabs result-view-tabs"><button className={view === "breakdown" ? "wl-sub-tab active" : "wl-sub-tab"} onClick={() => setView("breakdown")}>Polling Unit Breakdown</button><button className={view !== "breakdown" ? "wl-sub-tab active" : "wl-sub-tab"} onClick={() => setView("winloss")}>Win / Loss Analysis</button></div>}
@@ -2333,6 +2334,7 @@ function Dashboard({ session, onLogout, onSessionUpdate }) {
   const [manageOfficers, setManageOfficers] = useState(false);
   const [mapDataPanel, setMapDataPanel] = useState(false);
   const [focusedOfficerId, setFocusedOfficerId] = useState("");
+  const [resultsOpen, setResultsOpen] = useState(false);
   const [partyMapAnalysis, setPartyMapAnalysis] = useState(null);
   const [analysisLayers, setAnalysisLayers] = useState([]);
   const [pendingAreaAction, setPendingAreaAction] = useState(null);
@@ -4571,13 +4573,14 @@ function Dashboard({ session, onLogout, onSessionUpdate }) {
             </span>
             <div>
               <b>{session.user.name}</b>
-              <small>
-                {session.user.role === "Admin"
+              {(() => {
+                const roleLabel = session.user.role === "Admin"
                   ? "Admin"
                   : session.user.role === "Super Admin"
                     ? "System Administrator"
-                    : session.user.role}
-              </small>
+                    : session.user.role;
+                return roleLabel !== session.user.name ? <small>{roleLabel}</small> : null;
+              })()}
               {(session.user.role === "Admin" || session.user.role === "Super Admin") && (
                 <span className="role-pill">
                   {session.user.role === "Super Admin" ? "SUPER ADMIN" : "ADMIN"}
@@ -5037,6 +5040,14 @@ function Dashboard({ session, onLogout, onSessionUpdate }) {
               Result
             </button>}
             <button
+              className="map-action result-center-open icon-only"
+              onClick={() => setResultsOpen(true)}
+              title="Dashboard"
+              aria-label="Dashboard"
+            >
+              <FaChartBar />
+            </button>
+            <button
               className={`map-action emergency-open ${sosHolding ? "sos-holding" : ""}`}
               {...sosHoldProps}
               title="Tap for SOS form or hold 5 seconds to send immediately"
@@ -5491,6 +5502,7 @@ function Dashboard({ session, onLogout, onSessionUpdate }) {
           />
         </Suspense>
       )}
+      {resultsOpen && <ResultsCenter incidents={incidents} parties={parties} officers={officers} mapLayers={mapLayers} selected={selected} onClose={() => setResultsOpen(false)} authToken={session.token} initialFocusParty={partyMapAnalysis?.party || ""} onPartyMapChange={setPartyMapAnalysis} onTool={runAnalyticTool} onCsv={importCsvPoints} onClear={clearMapTools} />}
       {pendingAreaAction && (
         <div className="modal-backdrop">
           <section className="modal area-action-modal">
