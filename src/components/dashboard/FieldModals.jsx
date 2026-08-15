@@ -648,32 +648,36 @@ export function OfficerManager({
     () => NIGERIA_STATES.map((code) => ({ code, label: STATE_CODE_TO_NAME[code] || code })),
     [],
   );
-  const initialLocations = getRegistrationLocationOptions(
-    isSupervisor ? currentUser.state : DEFAULT_REGISTRATION_STATE,
-    isSupervisor ? currentUser.lga : undefined,
-    isSupervisor ? currentUser.ward : undefined,
-  );
-  const newAccountForm = () => ({
-    id: "",
-    name: "",
-    email: "",
-    password: "",
-    rank: defaultRole,
-    unit: "Field Team",
-    unitType: "Field Team",
-    command: "Kwara State Election Operations",
-    division: "",
-    station: "",
-    state: isSupervisor ? currentUser.state : DEFAULT_REGISTRATION_STATE,
-    lga: isSupervisor ? currentUser.lga : initialLocations.lgas[0] || "",
-    ward: isSupervisor ? currentUser.ward : initialLocations.wards[0] || "",
-    pollingUnit: isSupervisor
-      ? currentUser.pollingUnit || initialLocations.pollingUnits[0] || ""
-      : initialLocations.pollingUnits[0] || "",
-    lat: String(currentUser.lat || "8.4799"),
-    lng: String(currentUser.lng || "4.5418"),
-    role: defaultRole,
-  });
+  const newAccountForm = () => {
+    const state = isSupervisor ? currentUser.state : DEFAULT_REGISTRATION_STATE;
+    const stateLocations = getRegistrationLocationOptions(state);
+    const lga = isSupervisor && currentUser.lga ? currentUser.lga : stateLocations.lgas[0] || "";
+    const lgaLocations = getRegistrationLocationOptions(state, lga);
+    const ward = isSupervisor && currentUser.ward ? currentUser.ward : lgaLocations.wards[0] || "";
+    const wardLocations = getRegistrationLocationOptions(state, lga, ward);
+    const pollingUnit = isSupervisor && currentUser.pollingUnit
+      ? currentUser.pollingUnit
+      : wardLocations.pollingUnits[0] || "";
+    return {
+      id: "",
+      name: "",
+      email: "",
+      password: "",
+      rank: defaultRole,
+      unit: "Field Team",
+      unitType: "Field Team",
+      command: "Kwara State Election Operations",
+      division: "",
+      station: "",
+      state,
+      lga,
+      ward,
+      pollingUnit,
+      lat: String(currentUser.lat || "8.4799"),
+      lng: String(currentUser.lng || "4.5418"),
+      role: defaultRole,
+    };
+  };
   const [form, setForm] = useState(newAccountForm);
   const [managerTab, setManagerTab] = useState("create");
   const [error, setError] = useState("");

@@ -6,7 +6,6 @@ import { io } from "socket.io-client";
 import {
   FaBullseye,
   FaCamera,
-  FaChartBar,
   FaCircle,
   FaComments,
   FaDrawPolygon,
@@ -739,6 +738,7 @@ function MapView({
   selectedBoundaryState,
   onBoundarySelect,
   onBoundaryClear,
+  focusedOfficerId,
 }) {
   const el = useRef(null);
   const leaflet = useRef(null);
@@ -952,9 +952,11 @@ function MapView({
       overlays.current.push(marker);
     });
     officers.forEach((item) => {
+      const locationName = item.locationName || item.unit || "Last known location";
+      const shortName = String(item.name || "User").trim().split(/\s+/).pop();
       const icon = L.divIcon({
         className: "",
-        html: `<div class="officer-marker ${item.status.toLowerCase()}"><span></span>${item.name.split(" ")[1]}</div>`,
+        html: `<div class="officer-marker ${item.status.toLowerCase()}"><span></span>${escapeMapText(shortName)}</div>`,
         iconSize: [92, 28],
         iconAnchor: [12, 14],
       });
@@ -962,7 +964,16 @@ function MapView({
         leaflet.current,
       );
       marker.bindPopup(
-        `<div class="marker-popup"><b>${item.name}</b><br>${item.unit}<br>Status: ${item.status}${item.lastSeen ? `<br>Last GPS: ${new Date(item.lastSeen).toLocaleTimeString()}` : ""}${item.speed != null ? `<br>Speed: ${Math.round(item.speed * 3.6)} km/h` : ""}<div class="marker-actions"><button data-tool="measure">Measure from here</button><button data-tool="route">Route from here</button></div></div>`,
+        `<div class="marker-popup"><b>${escapeMapText(item.name)}</b><br>${escapeMapText(locationName)}<br>Status: ${escapeMapText(item.status)}${item.lastSeen ? `<br>Last GPS: ${new Date(item.lastSeen).toLocaleTimeString()}` : ""}${item.speed != null ? `<br>Speed: ${Math.round(item.speed * 3.6)} km/h` : ""}<div class="marker-actions"><button data-tool="measure">Measure from here</button><button data-tool="route">Route from here</button></div></div>`,
+      );
+      marker.bindTooltip(
+        `<strong>${escapeMapText(item.name)}</strong><br>${escapeMapText(locationName)}`,
+        {
+          permanent: item.id === focusedOfficerId,
+          direction: "top",
+          offset: [0, -10],
+          className: "officer-location-tooltip",
+        },
       );
       marker.on("popupopen", (event) =>
         event.popup
@@ -1024,7 +1035,7 @@ function MapView({
       );
       overlays.current.push(marker);
     });
-  }, [incidents, officers, cameras, emergencyAlerts, onMarkerTool]);
+  }, [incidents, officers, cameras, emergencyAlerts, onMarkerTool, focusedOfficerId]);
   useEffect(() => {
     if (!leaflet.current) return;
     areaLayers.current.forEach((x) => x.remove());
@@ -2321,7 +2332,7 @@ function Dashboard({ session, onLogout, onSessionUpdate }) {
   const [notice, setNotice] = useState("");
   const [manageOfficers, setManageOfficers] = useState(false);
   const [mapDataPanel, setMapDataPanel] = useState(false);
-  const [resultsOpen, setResultsOpen] = useState(false);
+  const [focusedOfficerId, setFocusedOfficerId] = useState("");
   const [partyMapAnalysis, setPartyMapAnalysis] = useState(null);
   const [analysisLayers, setAnalysisLayers] = useState([]);
   const [pendingAreaAction, setPendingAreaAction] = useState(null);
@@ -2407,15 +2418,17 @@ function Dashboard({ session, onLogout, onSessionUpdate }) {
         .filter((u) => ["Response Team", "Agent"].includes(u.role))
         .map((u, index) => {
           const live = gpsPositions[u.id];
+          const hasLiveLocation = Number.isFinite(Number(live?.lat)) && Number.isFinite(Number(live?.lng));
+          const hasStoredLocation = Number.isFinite(Number(u.lat)) && Number.isFinite(Number(u.lng));
           return {
             ...u,
             lat:
-              live?.lat ??
-              (Number(u.lat) ||
+              (hasLiveLocation ? Number(live.lat) : null) ??
+              (hasStoredLocation ? Number(u.lat) :
                 FIELD_TEAM_POSITIONS[index % FIELD_TEAM_POSITIONS.length][0]),
             lng:
-              live?.lng ??
-              (Number(u.lng) ||
+              (hasLiveLocation ? Number(live.lng) : null) ??
+              (hasStoredLocation ? Number(u.lng) :
                 FIELD_TEAM_POSITIONS[index % FIELD_TEAM_POSITIONS.length][1]),
             status: live?.offline
               ? "Offline"
@@ -2428,10 +2441,32 @@ function Dashboard({ session, onLogout, onSessionUpdate }) {
             heading: live?.heading,
             lastSeen: live?.timestamp,
             unit: u.unit || `Field Unit ${String(index + 1).padStart(2, "0")}`,
+            hasLastKnownLocation: hasLiveLocation || hasStoredLocation,
+            locationName:
+              u.pollingUnit ||
+              [u.ward, u.lga, u.state].filter(Boolean).join(", ") ||
+              u.unit ||
+              "Last known location",
           };
         }),
     [users, gpsPositions],
   );
+  const focusOfficerOnMap = (officer) => {
+    if (!officer?.hasLastKnownLocation) {
+      setNotice(`No last seen location is available for ${officer?.name || "this user"}`);
+      setTimeout(() => setNotice(""), 2500);
+      return;
+    }
+    const lat = Number(officer.lat);
+    const lng = Number(officer.lng);
+    if (!Number.isFinite(lat) || !Number.isFinite(lng)) return;
+    setFocusedOfficerId(officer.id);
+    setSelected(null);
+    setCoords(`${lat.toFixed(6)}, ${lng.toFixed(6)}`);
+    mapRef.current?.flyTo([lat, lng], 17);
+    setNotice(`${officer.name} — ${officer.locationName}`);
+    setTimeout(() => setNotice(""), 2500);
+  };
   const canAdmin = ["Admin", "Super Admin"].includes(session.user.role);
   const isAgent = session.user.role === "Agent";
   const isSupervisor = session.user.role === "Supervisor";
@@ -4657,9 +4692,6 @@ function Dashboard({ session, onLogout, onSessionUpdate }) {
                     onPassword={() => { setProfileOpen(true); setOperationsOpen(false); }}
                   />
                 )}
-                <button onClick={() => setResultsOpen(true)}>
-                  <FaChartBar /> Results & Forecast
-                </button>
                 {canAdmin && (
                   <button onClick={() => setPartyManagerOpen(true)}>
                     <FaUserCog /> Political Parties
@@ -4685,14 +4717,20 @@ function Dashboard({ session, onLogout, onSessionUpdate }) {
                 {situationalOpen && (
                   <div className="sidebar-dropdown-body">
                     {officers.map((o) => (
-                      <div className="officer-row" key={o.id}>
+                      <button
+                        type="button"
+                        className={`officer-row ${focusedOfficerId === o.id ? "focused" : ""}`}
+                        key={o.id}
+                        onClick={() => focusOfficerOnMap(o)}
+                        title={o.hasLastKnownLocation ? `Show ${o.name} at ${o.locationName}` : `No last seen location for ${o.name}`}
+                      >
                         <i className={o.status.toLowerCase()}></i>
                         <div>
                           <b>{o.rank ? `${o.rank} ${o.name}` : o.name}</b>
-                          <small>{o.unit}</small>
+                          <small>{o.locationName}</small>
                         </div>
                         <span>{o.status}</span>
-                      </div>
+                      </button>
                     ))}
                   </div>
                 )}
@@ -4974,16 +5012,6 @@ function Dashboard({ session, onLogout, onSessionUpdate }) {
             >
               <FaVideo />
             </button>
-            <button
-              className="map-action result-center-open"
-              onClick={() => setResultsOpen(true)}
-              title="Actions, reports, results, forecast, and news"
-            >
-              Dashboard
-            </button>
-           
-           
-           
             {canAdmin && (
               <button
                 className="map-action camera-count"
@@ -5108,6 +5136,7 @@ function Dashboard({ session, onLogout, onSessionUpdate }) {
             setSelectedBoundaryLabel(label);
           }}
           onBoundaryClear={clearBoundarySelection}
+          focusedOfficerId={focusedOfficerId}
         />}
         {!isAgent && <button
           className="my-location-target"
@@ -5422,7 +5451,6 @@ function Dashboard({ session, onLogout, onSessionUpdate }) {
           )}
         </section>
       )}
-      {resultsOpen && <ResultsCenter incidents={incidents} parties={parties} officers={officers} mapLayers={mapLayers} selected={selected} onClose={() => setResultsOpen(false)} authToken={session.token} initialFocusParty={partyMapAnalysis?.party || ""} onPartyMapChange={setPartyMapAnalysis} onTool={runAnalyticTool} onCsv={importCsvPoints} onClear={clearMapTools} />}
       {activeEmergency && (
         <div className="emergency-alert-card">
           <b>Emergency from {activeEmergency.name}</b>
