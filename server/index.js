@@ -944,6 +944,16 @@ app.get('/api/irev/osun', auth, rateLimit, asyncRoute(async (req, res) => {
     return res.status(503).json({ message: 'The official IReV feed is temporarily unavailable.' });
   }
 }));
+const sendIrevAiFailure = (res, response, body, provider) => {
+  const providerMessage = sanitizeString(body?.error?.message || body?.message || `${provider} image extraction failed.`).slice(0, 500);
+  const providerCode = String(body?.error?.code || body?.error?.status || body?.code || '').toLowerCase();
+  const combined = `${providerMessage} ${providerCode}`.toLowerCase();
+  const quotaFinished = response.status === 402 || /insufficient[_ -]?quota|quota (?:has been )?exceeded|credit|billing|balance|payment required|resource_exhausted/.test(combined);
+  const rateLimited = response.status === 429 || /rate[_ -]?limit|too many requests/.test(combined);
+  if (quotaFinished) return res.status(429).json({ code: 'AI_QUOTA_EXHAUSTED', message: `${provider} AI token quota or credit has finished. Automatic result extraction has stopped.` });
+  if (rateLimited) return res.status(429).json({ code: 'AI_RATE_LIMITED', message: `${provider} AI is rate-limited. Automatic result extraction has stopped to prevent repeated requests.` });
+  return res.status(502).json({ code: 'AI_EXTRACTION_FAILED', message: providerMessage });
+};
 app.post('/api/irev/osun/ocr', auth, adminOnly, rateLimit, asyncRoute(async (req, res) => {
   const uploadId = sanitizeString(req.body?.uploadId || '');
   const pilot = await loadOsunIrevPilot();
@@ -968,7 +978,7 @@ app.post('/api/irev/osun/ocr', auth, adminOnly, rateLimit, asyncRoute(async (req
       }),
     });
     const body = await response.json().catch(() => ({}));
-    if (!response.ok) return res.status(502).json({ message: body?.error?.message || 'Groq image extraction failed.' });
+    if (!response.ok) return sendIrevAiFailure(res, response, body, 'Groq');
     text = body.choices?.[0]?.message?.content || '';
     provider = 'groq';
   } else if (process.env.GEMINI_API_KEY) {
@@ -984,7 +994,7 @@ app.post('/api/irev/osun/ocr', auth, adminOnly, rateLimit, asyncRoute(async (req
       body: JSON.stringify({ contents: [{ parts: [{ text: prompt }, { inline_data: { mime_type: mimeType, data: imageBytes.toString('base64') } }] }], generationConfig: { temperature: 0 } }),
     });
     const body = await response.json().catch(() => ({}));
-    if (!response.ok) return res.status(502).json({ message: body?.error?.message || 'Image extraction failed.' });
+    if (!response.ok) return sendIrevAiFailure(res, response, body, 'Gemini');
     text = body.candidates?.[0]?.content?.parts?.map(part => part.text || '').join('') || '';
     provider = 'gemini';
   } else if (process.env.OPENAI_API_KEY) {
@@ -994,7 +1004,7 @@ app.post('/api/irev/osun/ocr', auth, adminOnly, rateLimit, asyncRoute(async (req
       body: JSON.stringify({ model, input: [{ role: 'user', content: [{ type: 'input_text', text: prompt }, { type: 'input_image', image_url: upload.imageUrl }] }], max_output_tokens: 900 }),
     });
     const body = await response.json().catch(() => ({}));
-    if (!response.ok) return res.status(502).json({ message: body?.error?.message || 'Image extraction failed.' });
+    if (!response.ok) return sendIrevAiFailure(res, response, body, 'OpenAI');
     text = body.output_text || body.output?.flatMap(item => item.content || []).map(item => item.text || '').join('') || '';
     provider = 'openai';
   } else {

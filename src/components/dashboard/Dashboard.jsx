@@ -504,7 +504,12 @@ async function request(path, token, options = {}) {
   });
   const contentType = response.headers.get("content-type") || "";
   const body = response.status === 204 ? null : contentType.includes("application/json") ? await response.json() : await response.text();
-  if (!response.ok) throw new Error((typeof body === "object" && body && body.message) || body || "Request failed");
+  if (!response.ok) {
+    const error = new Error((typeof body === "object" && body && body.message) || body || "Request failed");
+    error.code = typeof body === "object" && body ? body.code : "";
+    error.status = response.status;
+    throw error;
+  }
   return body;
 }
 
@@ -2206,6 +2211,7 @@ function ResultsCenter({ incidents, parties = [], officers = [], mapLayers = [],
   const [irevExtractingId, setIrevExtractingId] = useState("");
   const [irevFailedIds, setIrevFailedIds] = useState(() => new Set());
   const [irevAutoStopped, setIrevAutoStopped] = useState(false);
+  const [irevAiStoppedReason, setIrevAiStoppedReason] = useState("");
   const [irevSection, setIrevSection] = useState("uploads");
   const [irevSearch, setIrevSearch] = useState("");
   const [irevPreview, setIrevPreview] = useState(null);
@@ -2248,9 +2254,18 @@ function ResultsCenter({ incidents, parties = [], officers = [], mapLayers = [],
       const result = await request("/irev/osun/ocr", authToken, { method: "POST", body: JSON.stringify({ uploadId }) });
       setIrevDrafts((current) => ({ ...current, [uploadId]: result }));
     } catch (error) {
-      setIrevError(error.message || "Image-to-text extraction failed.");
       setIrevFailedIds((current) => new Set(current).add(uploadId));
-      if (/configure|not configured|service unavailable|api key/i.test(error.message || "")) setIrevAutoStopped(true);
+      if (["AI_QUOTA_EXHAUSTED", "AI_RATE_LIMITED"].includes(error.code)) {
+        setIrevError("");
+        setIrevAutoStopped(true);
+        setIrevAiStoppedReason(error.message);
+      } else if (/configure|not configured|service unavailable|api key/i.test(error.message || "")) {
+        setIrevError("");
+        setIrevAutoStopped(true);
+        setIrevAiStoppedReason(error.message);
+      } else {
+        setIrevError(error.message || "Image-to-text extraction failed.");
+      }
     } finally {
       setIrevExtractingId("");
     }
@@ -2519,6 +2534,7 @@ function ResultsCenter({ incidents, parties = [], officers = [], mapLayers = [],
           {sourceStats.filter((item) => item.source !== "INEC IReV").map((item) => <button type="button" className={`result-source-card ${resultSourceFilter === item.source ? "active" : ""}`} key={item.source} onClick={() => setResultSourceFilter((current) => current === item.source ? "" : item.source)}><span>{item.source}</span><strong>{item.submissions}</strong><small>{item.units} polling unit{item.units === 1 ? "" : "s"} · {item.votes.toLocaleString()} votes</small></button>)}
           <article className="result-source-card field-total"><span>Field submissions</span><strong>{fieldResultRows.length}</strong><small>Agent and Supervisor updates</small></article>
         </section>
+        {irevAiStoppedReason && <div className="irev-ai-stopped"><MdWarning /><div><strong>AI extraction stopped</strong><span>{irevAiStoppedReason}</span></div></div>}
         </>}
         {view === "irev" && <section className="irev-pilot-card">
           <header className="irev-pilot-head">
@@ -2526,6 +2542,7 @@ function ResultsCenter({ incidents, parties = [], officers = [], mapLayers = [],
             <div className="irev-pilot-actions"><a href={irevPilot?.portalUrl || "https://irev.inecnigeria.org/"} target="_blank" rel="noreferrer">Open IReV</a><button type="button" disabled={irevLoading} onClick={() => loadIrevPilot(true)}><FaSyncAlt /> {irevLoading ? "Checking…" : "Refresh now"}</button></div>
           </header>
           {irevError && <div className="error">{irevError}</div>}
+          {irevAiStoppedReason && <div className="irev-ai-stopped"><MdWarning /><div><strong>AI extraction stopped</strong><span>{irevAiStoppedReason}</span></div></div>}
           {irevPilot && <>
             <div className="irev-pilot-stats"><div><span>Uploaded</span><strong>{irevPilot.submitted.toLocaleString()}</strong></div><div><span>Expected</span><strong>{irevPilot.expected.toLocaleString()}</strong></div><div><span>Coverage</span><strong>{irevPilot.expected ? `${((irevPilot.submitted / irevPilot.expected) * 100).toFixed(1)}%` : "—"}</strong></div><div><span>Last checked</span><strong>{new Date(irevPilot.fetchedAt).toLocaleTimeString()}</strong></div></div>
             <p className="irev-verification-note"><MdWarning /> {irevPilot.notice}</p>

@@ -1476,3 +1476,8 @@ body.resizing-sidebar{cursor:col-resize;user-select:none}
 .field-mismatch-modal article span { color: #fdba74 !important; font-size: 10px !important; text-transform: uppercase; }
 .field-mismatch-modal article strong { color: #fff !important; font-size: 25px !important; }
 @media(max-width:760px) { .result-compare-actions { align-items: stretch; flex-direction: column; } .field-mismatch-modal > div { grid-template-columns: 1fr; } }
+.irev-ai-stopped { display: flex; align-items: flex-start; gap: 10px; margin: 0 20px 16px; padding: 12px 14px; border: 1px solid #ef4444; border-radius: 9px; background: #3b0b12; color: #fecaca !important; }
+.irev-ai-stopped > svg { flex: 0 0 auto; margin-top: 2px; color: #f87171; }
+.irev-ai-stopped > div { display: grid; gap: 3px; }
+.irev-ai-stopped strong { color: #fff !important; }
+.irev-ai-stopped span { color: #fecaca !important; font-size: 11px !important; }
