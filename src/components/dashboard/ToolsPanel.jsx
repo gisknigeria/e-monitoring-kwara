@@ -77,15 +77,6 @@ export default function ToolsPanel({
 }) {
   return (
     <div className="sidebar-tools-dropdown">
-      <div className="sidebar-panel-head">
-        <div>
-          <span className="eyebrow">COMMAND TOOLS</span>
-          <h2>Actions</h2>
-        </div>
-        <button className="icon-btn" onClick={onClose}>
-          <FaTimes />
-        </button>
-      </div>
       <div className="sidebar-tools-grid">
         <button
           className={drawMode === "measure" ? "active" : ""}
