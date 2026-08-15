@@ -18,15 +18,34 @@ import { FALLBACK_ICE_SERVERS, normalizeMeteredDomain, normalizeMeteredRegion, s
 const { Pool } = pg;
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const dataFile = process.env.DATA_FILE || join(__dirname, 'data.json');
+const jwtSecretFile = process.env.JWT_SECRET_FILE || `${dataFile}.jwt-secret`;
+const persistentFallbackSecret = () => {
+  try {
+    const saved = readFileSync(jwtSecretFile, 'utf8').trim();
+    if (Buffer.byteLength(saved, 'utf8') >= 32) return saved;
+  } catch {}
+
+  const generated = randomBytes(32).toString('hex');
+  try {
+    writeFileSync(jwtSecretFile, generated, { encoding: 'utf8', mode: 0o600, flag: 'wx' });
+    return generated;
+  } catch {
+    try {
+      const saved = readFileSync(jwtSecretFile, 'utf8').trim();
+      if (Buffer.byteLength(saved, 'utf8') >= 32) return saved;
+    } catch {}
+    return generated;
+  }
+};
 const ensureJwtSecret = () => {
   const configured = process.env.JWT_SECRET;
   if (!configured) {
-    console.warn('JWT_SECRET is not set. Using a generated ephemeral secret for this process.');
-    return randomBytes(32).toString('hex');
+    console.warn('JWT_SECRET is not set. Using a generated secret persisted beside the data file.');
+    return persistentFallbackSecret();
   }
   if (Buffer.byteLength(configured, 'utf8') < 32) {
-    console.warn('JWT_SECRET is shorter than 32 bytes. Generating a secure fallback secret for this instance.');
-    return randomBytes(32).toString('hex');
+    console.warn('JWT_SECRET is shorter than 32 bytes. Using a secure secret persisted beside the data file.');
+    return persistentFallbackSecret();
   }
   return configured;
 };

@@ -3,6 +3,21 @@ import { FaEye, FaEyeSlash } from "react-icons/fa";
 
 const API = "/api";
 
+const safeApiErrorMessage = (status, body, contentType = "") => {
+  const message = typeof body === "object" && body
+    ? body?.message
+    : typeof body === "string"
+      ? body.trim()
+      : "";
+  const isHtml = contentType.toLowerCase().includes("text/html")
+    || /<!doctype\s+html|<html[\s>]|<style[\s>]|data:font\//i.test(message);
+
+  if (status === 429) return "Too many requests. Please wait a moment and try again.";
+  if (!isHtml && message && message.length <= 300) return message;
+  if (status >= 500) return "Service temporarily unavailable. Please try again shortly.";
+  return `Request failed (${status})`;
+};
+
 async function request(path, token, options = {}) {
   const response = await fetch(`${API}${path}`, {
     ...options,
@@ -16,13 +31,14 @@ async function request(path, token, options = {}) {
     },
   });
 
+  const contentType = response.headers.get("content-type") || "";
   if (!response.ok) {
-    const error = await response.json().catch(() => ({}));
-    const message = error.message || `Request failed (${response.status})`;
-    throw new Error(message);
+    const body = contentType.includes("application/json")
+      ? await response.json().catch(() => ({}))
+      : await response.text().catch(() => "");
+    throw new Error(safeApiErrorMessage(response.status, body, contentType));
   }
 
-  const contentType = response.headers.get("content-type") || "";
   if (contentType.includes("application/json")) return response.json();
   return null;
 }
