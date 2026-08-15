@@ -515,6 +515,7 @@ const io = new Server(server, {
 const activeCameraShares = new Map();
 const loginLimiter = createRateLimitState();
 const generalLimiter = createRateLimitState();
+const irevOcrLimiter = createRateLimitState();
 const socketLimiter = createRateLimitState();
 const openAiPrimaryModel = process.env.OPENAI_MODEL || 'gpt-5.6-terra';
 const openAiFallbackModel = process.env.OPENAI_FALLBACK_MODEL || 'gpt-5.6-luna';
@@ -658,6 +659,16 @@ const rateLimit = (req, res, next) => {
   if (!result.allowed) {
     res.setHeader('Retry-After', String(Math.max(1, Math.ceil((result.resetAt - Date.now()) / 1000))));
     return res.status(429).json({ message: 'Too many requests. Please try again shortly.' });
+  }
+  next();
+};
+const irevOcrRateLimit = (req, res, next) => {
+  const key = `${req.ip || 'global'}:${req.user?.id || 'anonymous'}`;
+  const result = irevOcrLimiter.hit(key, 600, 60_000);
+  res.setHeader('RateLimit-Remaining', String(result.remaining));
+  if (!result.allowed) {
+    res.setHeader('Retry-After', String(Math.max(1, Math.ceil((result.resetAt - Date.now()) / 1000))));
+    return res.status(429).json({ code: 'OCR_QUEUE_RATE_LIMITED', message: 'OCR is temporarily paused and will resume automatically.' });
   }
   next();
 };
@@ -1006,18 +1017,24 @@ const extractPartyVotesFromOcr = (text, configuredParties = []) => {
   }
   return results;
 };
-app.post('/api/irev/osun/ocr', auth, adminOnly, rateLimit, asyncRoute(async (req, res) => {
+app.post('/api/irev/osun/ocr', auth, adminOnly, irevOcrRateLimit, asyncRoute(async (req, res) => {
   const uploadId = sanitizeString(req.body?.uploadId || '');
   const pilot = await loadOsunIrevPilot();
   const upload = pilot.uploads.find(item => item.id === uploadId);
   if (!upload) return res.status(404).json({ message: 'IReV upload not found in the recent official feed.' });
   if (irevOcrCache.has(uploadId)) return res.json(irevOcrCache.get(uploadId));
   const imageResponse = await fetch(upload.imageUrl, { signal: AbortSignal.timeout(20_000), headers: { 'User-Agent': 'Election-Monitor/1.0 IReV OCR archive' } });
+  if (imageResponse.status === 429) return res.status(429).json({ code: 'IREV_IMAGE_RATE_LIMITED', message: 'IReV is temporarily limiting image downloads. OCR will resume automatically.' });
   if (!imageResponse.ok) return res.status(502).json({ code: 'OCR_IMAGE_UNAVAILABLE', message: 'The official result image could not be retrieved.' });
-  const mimeType = String(imageResponse.headers.get('content-type') || '').split(';')[0];
-  if (!['image/jpeg', 'image/png', 'image/webp'].includes(mimeType)) return res.status(415).json({ code: 'OCR_IMAGE_FORMAT', message: 'The IReV result image format is not supported.' });
   const imageBytes = Buffer.from(await imageResponse.arrayBuffer());
+  if (!imageBytes.length) return res.status(422).json({ code: 'OCR_IMAGE_EMPTY', message: 'The IReV result image is empty.' });
   if (imageBytes.length > 8 * 1024 * 1024) return res.status(413).json({ code: 'OCR_IMAGE_TOO_LARGE', message: 'The IReV result image is too large to extract.' });
+  try {
+    const metadata = await sharp(imageBytes).metadata();
+    if (!metadata.format || !metadata.width || !metadata.height) throw new Error('Invalid image');
+  } catch {
+    return res.status(415).json({ code: 'OCR_IMAGE_FORMAT', message: 'This file is not a valid result-sheet image.' });
+  }
   let text = '';
   try {
     text = await recognizeIrevImage(imageBytes);

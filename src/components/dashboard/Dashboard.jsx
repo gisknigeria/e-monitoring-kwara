@@ -2212,6 +2212,7 @@ function ResultsCenter({ incidents, parties = [], officers = [], mapLayers = [],
   const [irevFailedIds, setIrevFailedIds] = useState(() => new Set());
   const [irevAutoStopped, setIrevAutoStopped] = useState(false);
   const [irevAiStoppedReason, setIrevAiStoppedReason] = useState("");
+  const irevResumeTimerRef = useRef(null);
   const [irevSection, setIrevSection] = useState("results");
   const [irevSearch, setIrevSearch] = useState("");
   const [irevPreview, setIrevPreview] = useState(null);
@@ -2254,22 +2255,31 @@ function ResultsCenter({ incidents, parties = [], officers = [], mapLayers = [],
       const result = await request("/irev/osun/ocr", authToken, { method: "POST", body: JSON.stringify({ uploadId }) });
       setIrevDrafts((current) => ({ ...current, [uploadId]: result }));
     } catch (error) {
-      setIrevFailedIds((current) => new Set(current).add(uploadId));
-      if (["AI_QUOTA_EXHAUSTED", "AI_RATE_LIMITED", "OCR_ENGINE_UNAVAILABLE"].includes(error.code)) {
+      if (["IREV_IMAGE_RATE_LIMITED", "OCR_QUEUE_RATE_LIMITED"].includes(error.code) || (error.status === 429 && !["AI_QUOTA_EXHAUSTED", "AI_RATE_LIMITED"].includes(error.code))) {
+        setIrevError("");
+        setIrevAutoStopped(true);
+        setIrevAiStoppedReason(error.message || "OCR is temporarily paused and will resume automatically.");
+        window.clearTimeout(irevResumeTimerRef.current);
+        irevResumeTimerRef.current = window.setTimeout(() => { setIrevAutoStopped(false); setIrevAiStoppedReason(""); }, 60_000);
+      } else if (["AI_QUOTA_EXHAUSTED", "AI_RATE_LIMITED", "OCR_ENGINE_UNAVAILABLE"].includes(error.code)) {
+        setIrevFailedIds((current) => new Set(current).add(uploadId));
         setIrevError("");
         setIrevAutoStopped(true);
         setIrevAiStoppedReason(error.message);
       } else if (/configure|not configured|service unavailable|api key/i.test(error.message || "")) {
+        setIrevFailedIds((current) => new Set(current).add(uploadId));
         setIrevError("");
         setIrevAutoStopped(true);
         setIrevAiStoppedReason(error.message);
       } else {
+        setIrevFailedIds((current) => new Set(current).add(uploadId));
         setIrevError(error.message || "Image-to-text extraction failed.");
       }
     } finally {
       setIrevExtractingIds((current) => { const next = new Set(current); next.delete(uploadId); return next; });
     }
   };
+  useEffect(() => () => window.clearTimeout(irevResumeTimerRef.current), []);
   const openIrevPreview = (upload) => {
     setIrevPreview(upload);
     if (canAdmin && !irevDrafts[upload.id] && !irevExtractingIds.has(upload.id)) extractIrevText(upload.id);
@@ -2535,7 +2545,7 @@ function ResultsCenter({ incidents, parties = [], officers = [], mapLayers = [],
           {sourceStats.filter((item) => item.source !== "INEC IReV").map((item) => <button type="button" className={`result-source-card ${resultSourceFilter === item.source ? "active" : ""}`} key={item.source} onClick={() => setResultSourceFilter((current) => current === item.source ? "" : item.source)}><span>{item.source}</span><strong>{item.submissions}</strong><small>{item.units} polling unit{item.units === 1 ? "" : "s"} · {item.votes.toLocaleString()} votes</small></button>)}
           <article className="result-source-card field-total"><span>Field submissions</span><strong>{fieldResultRows.length}</strong><small>Agent and Supervisor updates</small></article>
         </section>
-        {irevAiStoppedReason && <div className="irev-ai-stopped"><MdWarning /><div><strong>OCR extraction stopped</strong><span>{irevAiStoppedReason}</span></div></div>}
+        {irevAiStoppedReason && <div className="irev-ai-stopped"><MdWarning /><div><strong>OCR status</strong><span>{irevAiStoppedReason}</span></div></div>}
         </>}
         {view === "irev" && <section className="irev-pilot-card">
           <header className="irev-pilot-head">
@@ -2543,7 +2553,7 @@ function ResultsCenter({ incidents, parties = [], officers = [], mapLayers = [],
             <div className="irev-pilot-actions"><a href={irevPilot?.portalUrl || "https://irev.inecnigeria.org/"} target="_blank" rel="noreferrer">Open IReV</a><button type="button" disabled={irevLoading} onClick={() => loadIrevPilot(true)}><FaSyncAlt /> {irevLoading ? "Checking…" : "Refresh now"}</button></div>
           </header>
           {irevError && <div className="error">{irevError}</div>}
-          {irevAiStoppedReason && <div className="irev-ai-stopped"><MdWarning /><div><strong>OCR extraction stopped</strong><span>{irevAiStoppedReason}</span></div></div>}
+          {irevAiStoppedReason && <div className="irev-ai-stopped"><MdWarning /><div><strong>OCR status</strong><span>{irevAiStoppedReason}</span></div></div>}
           {irevPilot && <>
             <section className="result-total-strip irev-result-totals">{irevTopParties.map((party) => <article className="result-total-card" key={party}><span>{party}</span><strong>{irevOnlyTotals[party].toLocaleString()}</strong></article>)}</section>
             <div className="irev-pilot-stats"><div><span>Uploaded</span><strong>{irevPilot.submitted.toLocaleString()}</strong></div><div><span>Expected</span><strong>{irevPilot.expected.toLocaleString()}</strong></div><div><span>Coverage</span><strong>{irevPilot.expected ? `${((irevPilot.submitted / irevPilot.expected) * 100).toFixed(1)}%` : "—"}</strong></div><div><span>Last checked</span><strong>{new Date(irevPilot.fetchedAt).toLocaleTimeString()}</strong></div></div>
