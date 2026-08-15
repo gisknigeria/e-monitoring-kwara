@@ -545,6 +545,58 @@ const groqPrimaryModel = process.env.GROQ_MODEL || 'openai/gpt-oss-20b';
 const groqFallbackModel = process.env.GROQ_FALLBACK_MODEL || 'openai/gpt-oss-20b';
 const groqNewsModel = process.env.GROQ_NEWS_MODEL || 'groq/compound-mini';
 const geminiVisionModel = process.env.GEMINI_VISION_MODEL || 'gemini-3.5-flash-lite';
+const geminiApiKeys = [...new Set([
+  process.env.GEMINI_API_KEY,
+  process.env.GEMINI_API_KEY_2,
+  process.env.GEMINI_API_KEY_3,
+].map(value => String(value || '').trim()).filter(Boolean))];
+const geminiKeyCooldowns = new Map();
+let geminiKeyCursor = 0;
+const callGeminiVision = async payload => {
+  if (!geminiApiKeys.length) {
+    const error = new Error('Gemini is not configured.');
+    error.status = 503;
+    throw error;
+  }
+  let lastError;
+  for (let attempt = 0; attempt < geminiApiKeys.length; attempt += 1) {
+    const keyIndex = geminiKeyCursor % geminiApiKeys.length;
+    geminiKeyCursor = (geminiKeyCursor + 1) % geminiApiKeys.length;
+    const apiKey = geminiApiKeys[keyIndex];
+    if ((geminiKeyCooldowns.get(apiKey) || 0) > Date.now()) continue;
+    let response;
+    let body = {};
+    try {
+      response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(geminiVisionModel)}:generateContent?key=${encodeURIComponent(apiKey)}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        signal: AbortSignal.timeout(35_000),
+        body: JSON.stringify(payload),
+      });
+      body = await response.json().catch(() => ({}));
+    } catch (cause) {
+      lastError = new Error('Gemini is temporarily unavailable.');
+      lastError.status = 503;
+      lastError.cause = cause;
+      geminiKeyCooldowns.set(apiKey, Date.now() + 15_000);
+      continue;
+    }
+    if (response.ok) return body;
+    lastError = new Error(body?.error?.message || 'Gemini could not read this result sheet.');
+    lastError.status = response.status;
+    if ([401, 403, 429].includes(response.status) || response.status >= 500) {
+      const cooldownMs = response.status === 429 || [401, 403].includes(response.status) ? 15 * 60_000 : 30_000;
+      geminiKeyCooldowns.set(apiKey, Date.now() + cooldownMs);
+      continue;
+    }
+    throw lastError;
+  }
+  if (!lastError) {
+    lastError = new Error('All Gemini keys are cooling down.');
+    lastError.status = 429;
+  }
+  throw lastError;
+};
 const groqApiKeys = [...new Set([
   process.env.GROQ_API_KEY,
   process.env.GROQ_API_KEY_2,
@@ -1082,44 +1134,33 @@ app.post('/api/irev/osun/ocr', auth, adminOnly, irevOcrRateLimit, asyncRoute(asy
   } catch {
     return res.status(415).json({ code: 'OCR_IMAGE_FORMAT', message: 'This file is not a valid result-sheet image.' });
   }
-  if (!process.env.GEMINI_API_KEY) return res.status(503).json({ code: 'AI_NOT_CONFIGURED', message: 'Gemini is not configured. Polling-unit uploads remain available.' });
+  if (!geminiApiKeys.length) return res.status(503).json({ code: 'AI_NOT_CONFIGURED', message: 'Gemini is not configured. Polling-unit uploads remain available.' });
   let body;
   try {
     const optimizedImage = await optimizeIrevImage(imageBytes);
-    const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(geminiVisionModel)}:generateContent?key=${encodeURIComponent(process.env.GEMINI_API_KEY)}`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      signal: AbortSignal.timeout(35_000),
-      body: JSON.stringify({
-        contents: [{ parts: [
-          { text: 'Read only the political-party vote table in this Nigerian INEC result sheet. Return every clearly readable party abbreviation and its vote count. Do not include totals, explanations, headings, or uncertain guesses.' },
-          { inline_data: { mime_type: 'image/jpeg', data: optimizedImage.toString('base64') } },
-        ] }],
-        generationConfig: {
-          responseMimeType: 'application/json',
-          responseSchema: {
-            type: 'OBJECT',
-            properties: {
-              results: {
-                type: 'ARRAY',
-                items: {
-                  type: 'OBJECT',
-                  properties: { party: { type: 'STRING' }, votes: { type: 'INTEGER' } },
-                  required: ['party', 'votes'],
-                },
+    body = await callGeminiVision({
+      contents: [{ parts: [
+        { text: 'Read only the political-party vote table in this Nigerian INEC result sheet. Return every clearly readable party abbreviation and its vote count. Do not include totals, explanations, headings, or uncertain guesses.' },
+        { inline_data: { mime_type: 'image/jpeg', data: optimizedImage.toString('base64') } },
+      ] }],
+      generationConfig: {
+        responseMimeType: 'application/json',
+        responseSchema: {
+          type: 'OBJECT',
+          properties: {
+            results: {
+              type: 'ARRAY',
+              items: {
+                type: 'OBJECT',
+                properties: { party: { type: 'STRING' }, votes: { type: 'INTEGER' } },
+                required: ['party', 'votes'],
               },
             },
-            required: ['results'],
           },
+          required: ['results'],
         },
-      }),
+      },
     });
-    body = await response.json().catch(() => ({}));
-    if (!response.ok) {
-      const error = new Error(body?.error?.message || 'Gemini could not read this result sheet.');
-      error.status = response.status;
-      throw error;
-    }
   } catch (error) {
     console.warn('[irev] Gemini extraction unavailable:', error.status || '', error.message);
     if (error.status === 429) return res.status(429).json({ code: 'AI_QUOTA_EXHAUSTED', message: 'Gemini extraction is paused because its quota is unavailable. Polling-unit uploads remain visible.' });
