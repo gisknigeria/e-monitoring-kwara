@@ -2369,7 +2369,7 @@ function ResultsCenter({ incidents, parties = [], officers = [], mapLayers = [],
     upload.results.forEach(({ party, votes }) => { totals[party] = (totals[party] || 0) + Number(votes || 0); });
     return totals;
   }, {}), [irevResultRows]);
-  const irevTopParties = useMemo(() => Object.keys(irevOnlyTotals).filter((party) => irevOnlyTotals[party] > 0).sort((a, b) => irevOnlyTotals[b] - irevOnlyTotals[a]).slice(0, 6), [irevOnlyTotals]);
+  const irevTopParties = useMemo(() => Object.keys(irevOnlyTotals).filter((party) => irevOnlyTotals[party] > 0).sort((a, b) => irevOnlyTotals[b] - irevOnlyTotals[a]).slice(0, 5), [irevOnlyTotals]);
   const top6 = useMemo(() => summary.partyNames.filter((party) => summary.totals[party] > 0).sort((a,b) => summary.totals[b]-summary.totals[a]).slice(0,6), [summary]);
   const winLoss = useMemo(() => {
     const groups = (key) => {
