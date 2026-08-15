@@ -2261,7 +2261,7 @@ function ResultsCenter({ incidents, parties = [], officers = [], mapLayers = [],
         setIrevAiStoppedReason(error.message || "OCR is temporarily paused and will resume automatically.");
         window.clearTimeout(irevResumeTimerRef.current);
         irevResumeTimerRef.current = window.setTimeout(() => { setIrevAutoStopped(false); setIrevAiStoppedReason(""); }, 60_000);
-      } else if (["AI_QUOTA_EXHAUSTED", "AI_RATE_LIMITED", "OCR_ENGINE_UNAVAILABLE"].includes(error.code)) {
+      } else if (["AI_QUOTA_EXHAUSTED", "AI_RATE_LIMITED"].includes(error.code)) {
         setIrevFailedIds((current) => new Set(current).add(uploadId));
         setIrevError("");
         setIrevAutoStopped(true);

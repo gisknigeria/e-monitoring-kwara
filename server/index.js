@@ -9,8 +9,6 @@ import { randomBytes } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 import pg from 'pg';
-import { createWorker } from 'tesseract.js';
-import tesseractEnglish from '@tesseract.js-data/eng';
 import sharp from 'sharp';
 import { canManageRank, getRegistrationLocationOptions, normalizeCommand, normalizeRegistrationState, ranksBelow } from '../shared/electionData.js';
 import { credentialFingerprint, createId, createRateLimitState, normalizeText, sanitizeString, validateContentLength, validateCoordinates, validateEmail, validateExternalUrl, validateMediaPayload, validatePassword } from './security.js';
@@ -863,7 +861,7 @@ const ensureIrevArchiveLoaded = () => {
       irevOsunCache = { data: { ...archive, offline: true }, expiresAt: 0 };
     }
     for (const [id, extraction] of Object.entries(extractions || {})) {
-      if (id && extraction?.provider === 'local-ocr' && Array.isArray(extraction?.results)) irevOcrCache.set(id, extraction);
+      if (id && Array.isArray(extraction?.results)) irevOcrCache.set(id, extraction);
     }
   });
   return irevArchiveLoadPromise;
@@ -958,21 +956,8 @@ app.get('/api/irev/osun', auth, rateLimit, asyncRoute(async (req, res) => {
     return res.status(503).json({ message: 'The official IReV feed is temporarily unavailable.' });
   }
 }));
-const DEFAULT_INEC_PARTIES = ['AAC', 'ADC', 'ADP', 'APC', 'APGA', 'APM', 'APP', 'BP', 'LP', 'NNPP', 'NRM', 'PDP', 'PRP', 'SDP', 'YPP', 'ZLP', 'AA', 'ACCORD'];
-const IREV_OCR_WORKER_COUNT = Math.max(1, Math.min(Number(process.env.IREV_OCR_WORKERS) || 3, 4));
-const irevTesseractWorkerPromises = Array(IREV_OCR_WORKER_COUNT).fill(null);
-const irevOcrQueues = Array.from({ length: IREV_OCR_WORKER_COUNT }, () => Promise.resolve());
-let irevNextWorker = 0;
 let irevOcrPersistQueue = Promise.resolve();
-const getIrevTesseractWorker = async index => {
-  if (!irevTesseractWorkerPromises[index]) {
-    irevTesseractWorkerPromises[index] = createWorker('eng', undefined, { langPath: tesseractEnglish.langPath, gzip: tesseractEnglish.gzip }).then(async worker => {
-      await worker.setParameters({ preserve_interword_spaces: '1' });
-      return worker;
-    }).catch(error => { irevTesseractWorkerPromises[index] = null; throw error; });
-  }
-  return irevTesseractWorkerPromises[index];
-};
+let geminiVisionCooldownUntil = 0;
 const optimizeIrevImage = imageBytes => sharp(imageBytes)
   .rotate()
   .trim({ background: '#ffffff', threshold: 8 })
@@ -982,41 +967,6 @@ const optimizeIrevImage = imageBytes => sharp(imageBytes)
   .sharpen()
   .png({ compressionLevel: 6 })
   .toBuffer();
-const recognizeIrevImage = async imageBytes => {
-  const optimizedImage = await optimizeIrevImage(imageBytes);
-  const workerIndex = irevNextWorker++ % IREV_OCR_WORKER_COUNT;
-  const task = irevOcrQueues[workerIndex].then(async () => {
-    const worker = await getIrevTesseractWorker(workerIndex);
-    const { data } = await worker.recognize(optimizedImage);
-    return String(data?.text || '');
-  });
-  irevOcrQueues[workerIndex] = task.catch(() => {});
-  return task;
-};
-const extractPartyVotesFromOcr = (text, configuredParties = []) => {
-  const parties = [...new Set([...DEFAULT_INEC_PARTIES, ...configuredParties]
-    .map(party => sanitizeString(party).trim().toUpperCase())
-    .filter(party => /^[A-Z0-9&-]{2,12}$/.test(party)))]
-    .sort((a, b) => b.length - a.length);
-  const lines = String(text || '').toUpperCase().split(/\r?\n/).map(line => line.replace(/[|]/g, ' ').replace(/\s+/g, ' ').trim()).filter(Boolean);
-  const results = [];
-  for (const party of parties) {
-    const escapedParty = party.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-    for (let index = 0; index < lines.length; index += 1) {
-      const match = lines[index].match(new RegExp(`(?:^|[^A-Z0-9])${escapedParty}(?:[^A-Z0-9]|$)`));
-      if (!match) continue;
-      const partyEnd = (match.index || 0) + match[0].length;
-      const sameLine = lines[index].slice(partyEnd).match(/\b\d{1,4}\b/g) || [];
-      const nextLine = !sameLine.length ? (lines[index + 1]?.match(/^\D{0,12}(\d{1,4})\b/) || [])[1] : null;
-      const rawVotes = sameLine.at(-1) ?? nextLine;
-      if (rawVotes == null) continue;
-      const votes = Number(rawVotes);
-      if (Number.isInteger(votes) && votes >= 0 && votes <= 5000) results.push({ party, votes });
-      break;
-    }
-  }
-  return results;
-};
 app.post('/api/irev/osun/ocr', auth, adminOnly, irevOcrRateLimit, asyncRoute(async (req, res) => {
   const uploadId = sanitizeString(req.body?.uploadId || '');
   const pilot = await loadOsunIrevPilot();
@@ -1035,16 +985,61 @@ app.post('/api/irev/osun/ocr', auth, adminOnly, irevOcrRateLimit, asyncRoute(asy
   } catch {
     return res.status(415).json({ code: 'OCR_IMAGE_FORMAT', message: 'This file is not a valid result-sheet image.' });
   }
-  let text = '';
+  if (!process.env.GEMINI_API_KEY) return res.status(503).json({ code: 'AI_NOT_CONFIGURED', message: 'Gemini is not configured. Saved IReV results remain available.' });
+  if (Date.now() < geminiVisionCooldownUntil) return res.status(429).json({ code: 'AI_QUOTA_EXHAUSTED', message: 'Gemini extraction is paused because its quota is unavailable. Saved IReV results remain visible and the live feed will continue updating.' });
+  const geminiModel = process.env.GEMINI_VISION_MODEL || 'gemini-2.5-flash';
+  let response;
   try {
-    text = await recognizeIrevImage(imageBytes);
+    const optimizedImage = await optimizeIrevImage(imageBytes);
+    response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(geminiModel)}:generateContent?key=${encodeURIComponent(process.env.GEMINI_API_KEY)}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        signal: AbortSignal.timeout(35_000),
+        body: JSON.stringify({
+          contents: [{ parts: [
+            { text: 'Read only the political-party vote table in this Nigerian INEC result sheet. Return every clearly readable party abbreviation and its vote count. Do not include totals, explanations, headings, or uncertain guesses.' },
+            { inline_data: { mime_type: 'image/png', data: optimizedImage.toString('base64') } },
+          ] }],
+          generationConfig: {
+            temperature: 0,
+            responseMimeType: 'application/json',
+            responseSchema: {
+              type: 'ARRAY',
+              items: {
+                type: 'OBJECT',
+                properties: { party: { type: 'STRING' }, votes: { type: 'INTEGER' } },
+                required: ['party', 'votes'],
+              },
+            },
+          },
+        }),
+      });
   } catch (error) {
-    console.error('[irev] Local OCR failed:', error.message);
-    return res.status(503).json({ code: 'OCR_ENGINE_UNAVAILABLE', message: 'Local OCR is unavailable. Automatic extraction has stopped.' });
+    console.warn('[irev] Gemini extraction unavailable:', error.message);
+    return res.status(503).json({ code: 'AI_SERVICE_UNAVAILABLE', message: 'Gemini is temporarily unavailable. Saved IReV results remain visible and the live feed will continue updating.' });
   }
-  const results = extractPartyVotesFromOcr(text, await store.parties());
+  const body = await response.json().catch(() => ({}));
+  if (!response.ok) {
+    const providerMessage = body?.error?.message || `Gemini returned ${response.status}`;
+    if (response.status === 429 || /quota|rate limit|resource exhausted/i.test(providerMessage)) {
+      geminiVisionCooldownUntil = Date.now() + 5 * 60_000;
+      return res.status(429).json({ code: 'AI_QUOTA_EXHAUSTED', message: 'Gemini token quota or rate limit has been reached. Extraction stopped, but saved IReV results remain visible and the live feed will continue updating.' });
+    }
+    return res.status(502).json({ code: 'AI_EXTRACTION_FAILED', message: 'Gemini could not read this result sheet.' });
+  }
+  let parsed = [];
+  try {
+    const responseText = body.candidates?.[0]?.content?.parts?.map(part => part.text || '').join('') || '';
+    parsed = JSON.parse(responseText);
+  } catch {
+    parsed = [];
+  }
+  const results = (Array.isArray(parsed) ? parsed : [])
+    .map(item => ({ party: sanitizeString(item?.party || '').replace(/[^A-Za-z0-9&-]/g, '').trim().toUpperCase().slice(0, 12), votes: Number(item?.votes) }))
+    .filter(item => item.party && Number.isInteger(item.votes) && item.votes >= 0 && item.votes <= 5000)
+    .reduce((unique, item) => unique.some(existing => existing.party === item.party) ? unique : [...unique, item], []);
   if (!results.length) return res.status(502).json({ message: 'No readable party vote counts were extracted from this image.' });
-  const extraction = { uploadId, results, provider: 'local-ocr', model: 'tesseract-eng', sourceUrl: upload.imageUrl, extractedAt: new Date().toISOString() };
+  const extraction = { uploadId, results, provider: 'gemini', model: geminiModel, sourceUrl: upload.imageUrl, extractedAt: new Date().toISOString() };
   irevOcrCache.set(uploadId, extraction);
   const persistenceTask = irevOcrPersistQueue.then(() => store.setSetting(IREV_OSUN_OCR_KEY, Object.fromEntries(irevOcrCache)));
   irevOcrPersistQueue = persistenceTask.catch(error => console.error('[irev] Could not persist OCR result:', error.message));
