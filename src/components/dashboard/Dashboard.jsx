@@ -1,6 +1,6 @@
 ﻿import { useEffect, useMemo, useRef, useState } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
-import { Fragment, lazy, Suspense } from "react";
+import { lazy, Suspense } from "react";
 import L from "leaflet";
 import { io } from "socket.io-client";
 import {
@@ -2205,6 +2205,7 @@ function ResultsCenter({ incidents, parties = [], officers = [], mapLayers = [],
   const [irevDrafts, setIrevDrafts] = useState({});
   const [irevExtractingId, setIrevExtractingId] = useState("");
   const [irevSearch, setIrevSearch] = useState("");
+  const [irevPreview, setIrevPreview] = useState(null);
   useEffect(() => {
     if (view !== "news" || news.length) return;
     setNewsLoading(true);
@@ -2239,6 +2240,10 @@ function ResultsCenter({ incidents, parties = [], officers = [], mapLayers = [],
       setIrevExtractingId("");
     }
   };
+  const openIrevPreview = (upload) => {
+    setIrevPreview(upload);
+    if (canAdmin && !irevDrafts[upload.id] && irevExtractingId !== upload.id) extractIrevText(upload.id);
+  };
   const reports = useMemo(
     () => incidents.filter((item) => item.reportType === POLLING_RESULT_TYPE),
     [incidents],
@@ -2272,6 +2277,7 @@ function ResultsCenter({ incidents, parties = [], officers = [], mapLayers = [],
   }), [summary.rows, irevPilot]);
   const fieldResultRows = useMemo(() => summary.rows.filter((row) => row.resultSource !== "INEC IReV"), [summary.rows]);
   const fieldResultTotals = useMemo(() => Object.fromEntries(summary.partyNames.map((party) => [party, fieldResultRows.reduce((total, row) => total + Number(row.results.find((item) => item.party === party)?.votes || 0), 0)])), [fieldResultRows, summary.partyNames]);
+  const fieldTopParties = useMemo(() => summary.partyNames.slice().sort((a, b) => fieldResultTotals[b] - fieldResultTotals[a]).slice(0, 5), [summary.partyNames, fieldResultTotals]);
   const displayedResultRows = useMemo(
     () => resultSourceFilter ? fieldResultRows.filter((row) => row.resultSource === resultSourceFilter) : fieldResultRows,
     [fieldResultRows, resultSourceFilter],
@@ -2282,7 +2288,7 @@ function ResultsCenter({ incidents, parties = [], officers = [], mapLayers = [],
     if (!query) return uploads;
     return uploads.filter((upload) => [upload.puCode, upload.pollingUnit, upload.ward, upload.lga].some((value) => String(value || "").toLowerCase().includes(query)));
   }, [irevPilot, irevSearch]);
-  const top6 = useMemo(() => summary.partyNames.slice().sort((a,b) => summary.totals[b]-summary.totals[a]).slice(0,6), [summary]);
+  const top6 = useMemo(() => summary.partyNames.slice().sort((a,b) => summary.totals[b]-summary.totals[a]).slice(0,5), [summary]);
   const winLoss = useMemo(() => {
     const groups = (key) => {
       const map = new Map();
@@ -2444,8 +2450,9 @@ function ResultsCenter({ incidents, parties = [], officers = [], mapLayers = [],
         {view === "winloss-lga" && <section className="result-table-card"><div className="result-table-title"><div><h2>LGA Win / Loss Analysis</h2><p>Leading party in each Local Government Area.</p></div></div><div className="wl-sub-tabs"><button className="wl-sub-tab" onClick={() => setView("winloss")}>By Ward</button><button className="wl-sub-tab active">By LGA</button></div><div className="result-table-scroll"><table className="result-progress-table"><thead><tr><th>LGA</th><th>Winner</th>{top6.map(p => <th key={p}>{p}</th>)}</tr></thead><tbody>{winLoss.lgas.map(g => <tr key={g.label}><td><b>{g.label}</b></td><td><b>{g.winner || "—"}</b></td>{top6.map(p => <td key={p}>{g.votes[p].toLocaleString()} {g.winner === p ? "✓" : g.winner ? "✕" : ""}</td>)}</tr>)}</tbody></table></div></section>}
         {["winloss", "winloss-lga"].includes(view) && <div className="result-table-card" style={{marginTop: 16}}><p className="muted">Select a party in the Action tab to compare its wins and losses. Results update automatically as new submissions arrive.</p></div>}
         {view !== "breakdown" ? null : <>
-        <section className="result-source-grid" aria-label="Result submission sources">
+        <section className="result-source-grid field-source-grid" aria-label="Result submission sources">
           {sourceStats.filter((item) => item.source !== "INEC IReV").map((item) => <button type="button" className={`result-source-card ${resultSourceFilter === item.source ? "active" : ""}`} key={item.source} onClick={() => setResultSourceFilter((current) => current === item.source ? "" : item.source)}><span>{item.source}</span><strong>{item.submissions}</strong><small>{item.units} polling unit{item.units === 1 ? "" : "s"} · {item.votes.toLocaleString()} votes</small></button>)}
+          <article className="result-source-card field-total"><span>Field submissions</span><strong>{fieldResultRows.length}</strong><small>Agent and Supervisor updates</small></article>
         </section>
         </>}
         {view === "irev" && <section className="irev-pilot-card">
@@ -2460,30 +2467,28 @@ function ResultsCenter({ incidents, parties = [], officers = [], mapLayers = [],
             <div className="irev-table-toolbar"><div><strong>All uploaded polling units</strong><span>{filteredIrevUploads.length.toLocaleString()} of {irevPilot.uploads.length.toLocaleString()} sheets shown</span></div><label><FaSearch /><input value={irevSearch} onChange={(event) => setIrevSearch(event.target.value)} placeholder="Search LGA, ward, polling unit or PU code" />{irevSearch && <button type="button" onClick={() => setIrevSearch("")} aria-label="Clear IReV search"><FaTimes /></button>}</label></div>
             <div className="irev-table-scroll">
               <table className="result-progress-table irev-full-table">
-                <thead><tr><th>#</th><th>LGA</th><th>Ward</th><th>Polling unit</th><th>PU code</th><th>Uploaded</th><th>Status</th><th>Result sheet</th>{canAdmin && <th>Text</th>}</tr></thead>
-                <tbody>{filteredIrevUploads.map((upload, index) => <Fragment key={upload.id}>
-                  <tr><td>{index + 1}</td><td><b>{upload.lga || "—"}</b></td><td>{upload.ward || "—"}</td><td>{upload.pollingUnit || "—"}</td><td><strong>{upload.puCode}</strong></td><td>{upload.uploadedAt ? new Date(upload.uploadedAt).toLocaleString() : "—"}</td><td><span className="irev-awaiting-badge">{upload.verificationStatus}</span></td><td><a className="irev-sheet-link" href={upload.imageUrl} target="_blank" rel="noreferrer">View image</a></td>{canAdmin && <td><button className="irev-extract-btn" type="button" disabled={irevExtractingId === upload.id} onClick={() => extractIrevText(upload.id)}><MdFlashOn /> {irevExtractingId === upload.id ? "Extracting…" : irevDrafts[upload.id] ? "Extracted" : "Extract text"}</button></td>}</tr>
-                  {irevDrafts[upload.id] && <tr className="irev-draft-row"><td colSpan={canAdmin ? 9 : 8}><div className="irev-ocr-draft"><strong>AI draft for {upload.puCode} — verify against the original image</strong><pre>{irevDrafts[upload.id].draft}</pre><small>{irevDrafts[upload.id].provider} · {irevDrafts[upload.id].model}</small></div></td></tr>}
-                </Fragment>)}</tbody>
+                <thead><tr><th>#</th><th>LGA</th><th>Ward</th><th>Polling unit</th><th>PU code</th><th>Uploaded</th><th>Status</th><th>Result sheet</th></tr></thead>
+                <tbody>{filteredIrevUploads.map((upload, index) => <tr key={upload.id}><td>{index + 1}</td><td><b>{upload.lga || "—"}</b></td><td>{upload.ward || "—"}</td><td>{upload.pollingUnit || "—"}</td><td><strong>{upload.puCode}</strong></td><td>{upload.uploadedAt ? new Date(upload.uploadedAt).toLocaleString() : "—"}</td><td><span className="irev-awaiting-badge">{upload.verificationStatus}</span></td><td><button className="irev-sheet-link" type="button" onClick={() => openIrevPreview(upload)}>View image</button></td></tr>)}</tbody>
               </table>
             </div>
+            {irevPreview && <div className="irev-preview-backdrop" onClick={() => setIrevPreview(null)}><section className="irev-preview-modal" onClick={(event) => event.stopPropagation()}><header><div><span className="eyebrow">INEC IREV RESULT SHEET</span><h2>{irevPreview.puCode}</h2><p>{irevPreview.lga} · {irevPreview.ward} · {irevPreview.pollingUnit}</p></div><button type="button" className="icon-btn" onClick={() => setIrevPreview(null)} aria-label="Close image preview"><FaTimes /></button></header><div className="irev-preview-body"><div className="irev-preview-image"><img src={irevPreview.imageUrl} alt={`INEC IReV result sheet for ${irevPreview.puCode}`} /></div><aside><div className="irev-preview-actions"><a href={irevPreview.imageUrl} download target="_blank" rel="noreferrer">Download image</a></div><h3>Result text</h3>{irevExtractingId === irevPreview.id && <p className="muted">Groq is reading and structuring the result sheet…</p>}{irevDrafts[irevPreview.id] ? <div className="irev-ocr-draft"><strong>AI draft — verify against image</strong><pre>{irevDrafts[irevPreview.id].draft}</pre><small>{irevDrafts[irevPreview.id].provider} · {irevDrafts[irevPreview.id].model}</small></div> : !canAdmin ? <p className="muted">Automatic extraction is available to administrators.</p> : !irevExtractingId && <p className="muted">Result text is unavailable. Check the AI configuration and try reopening this image.</p>}</aside></div></section></div>}
           </>}
           {!irevPilot && irevLoading && <p className="muted">Connecting to the official IReV feed…</p>}
         </section>}
         {view !== "breakdown" ? null : <>
         <section className="result-total-strip">
-          <article className="result-total-card grand"><span>Field submissions</span><strong>{fieldResultRows.length}</strong><small>Agent and Supervisor updates</small></article>{summary.partyNames.map(party => <article className="result-total-card" key={party}><span>{party}</span><strong>{fieldResultTotals[party].toLocaleString()}</strong><small>Agent and Supervisor votes</small></article>)}
+          {fieldTopParties.map(party => <article className="result-total-card" key={party}><span>{party}</span><strong>{fieldResultTotals[party].toLocaleString()}</strong><small>Agent and Supervisor votes</small></article>)}
         </section>
         <section className="result-table-card">
           <div className="result-table-title"><div><h2>Polling-unit breakdown</h2><p>{resultSourceFilter ? `${resultSourceFilter} submissions only. Select the active source card again to show all.` : "Agent and Supervisor counts with field evidence."}</p></div><b>{displayedResultRows.length} shown</b></div>
           <div className="result-table-scroll">
             <table className="result-progress-table">
-              <thead><tr><th>Source</th><th>LGA</th><th>Ward</th><th>Polling unit</th>{summary.partyNames.map(party => <th key={party}>{party}</th>)}<th>Location</th><th>Evidence</th><th>Uploaded</th></tr></thead>
+              <thead><tr><th>Source</th><th>LGA</th><th>Ward</th><th>Polling unit</th>{fieldTopParties.map(party => <th key={party}>{party}</th>)}<th>Location</th><th>Evidence</th><th>Uploaded</th></tr></thead>
               <tbody>
                 {displayedResultRows.map((row) => (
-                  <tr key={row.id}><td><span className={`result-source-badge source-${row.resultSource.toLowerCase().replace(/[^a-z]+/g, "-")}`}>{row.resultSource}</span></td><td>{row.lga || "—"}</td><td>{row.ward || "—"}</td><td><b>{row.pollingUnit || "—"}</b></td>{summary.partyNames.map(party => <td key={party}><strong>{Number(row.results.find(item => item.party === party)?.votes || 0).toLocaleString()}</strong></td>)}<td>{Number(row.lat).toFixed(5)}, {Number(row.lng).toFixed(5)}</td><td><div className="result-evidence">{(row.media || []).filter((item) => item.type === "image").slice(0, 2).map((item, index) => <a href={item.data} target="_blank" rel="noreferrer" key={`${row.id}-${index}`}><img src={item.data} alt={`Evidence for ${row.pollingUnit}`} /></a>)}</div></td><td>{new Date(row.createdAt).toLocaleString()}</td></tr>
+                  <tr key={row.id}><td><span className={`result-source-badge source-${row.resultSource.toLowerCase().replace(/[^a-z]+/g, "-")}`}>{row.resultSource}</span></td><td>{row.lga || "—"}</td><td>{row.ward || "—"}</td><td><b>{row.pollingUnit || "—"}</b></td>{fieldTopParties.map(party => <td key={party}><strong>{Number(row.results.find(item => item.party === party)?.votes || 0).toLocaleString()}</strong></td>)}<td>{Number(row.lat).toFixed(5)}, {Number(row.lng).toFixed(5)}</td><td><div className="result-evidence">{(row.media || []).filter((item) => item.type === "image").slice(0, 2).map((item, index) => <a href={item.data} target="_blank" rel="noreferrer" key={`${row.id}-${index}`}><img src={item.data} alt={`Evidence for ${row.pollingUnit}`} /></a>)}</div></td><td>{new Date(row.createdAt).toLocaleString()}</td></tr>
                 ))}
-                {!displayedResultRows.length && <tr><td className="result-empty" colSpan={summary.partyNames.length + 8}>No {resultSourceFilter || "polling-unit"} results have been uploaded yet.</td></tr>}
+                {!displayedResultRows.length && <tr><td className="result-empty" colSpan={fieldTopParties.length + 8}>No {resultSourceFilter || "polling-unit"} results have been uploaded yet.</td></tr>}
               </tbody>
             </table>
           </div>
