@@ -81,6 +81,7 @@ jsonDb.chatRooms ||= [];
 jsonDb.chatMembers ||= [];
 jsonDb.chatMessages ||= [];
 jsonDb.parties ||= [];
+jsonDb.appSettings ||= {};
 const existingSeedUsers = new Map(jsonDb.users.filter(user => ['u0', 'u1'].includes(user.id)).map(user => [user.id, user]));
 jsonDb.users = jsonDb.users.filter(user => !['u0', 'u1', 'u2', 'u3'].includes(user.id));
 jsonDb.users.unshift(...seed.users.map(user => {
@@ -261,6 +262,16 @@ async function initPostgres() {
 }
 
 const store = {
+  async setting(key, fallback = null) {
+    if (!pool) return jsonDb.appSettings?.[key] ?? fallback;
+    const { rows } = await pool.query('select value from app_settings where key=$1', [key]);
+    return rows[0]?.value ?? fallback;
+  },
+  async setSetting(key, value) {
+    if (!pool) { jsonDb.appSettings ||= {}; jsonDb.appSettings[key] = value; saveJson(); return value; }
+    await pool.query('insert into app_settings (key,value) values ($1,$2) on conflict (key) do update set value=excluded.value', [key, JSON.stringify(value)]);
+    return value;
+  },
   async parties() {
     if (!pool) return jsonDb.parties || [];
     const { rows } = await pool.query("select value from app_settings where key='political_parties'");
@@ -826,6 +837,23 @@ const IREV_OSUN_PORTAL_URL = `https://irev.inecnigeria.org/elections/${IREV_OSUN
 const IREV_IMAGE_HOSTS = new Set(['inc-s3-cache.incportals.com', 'etransmission-result-docs.s3.eu-west-2.amazonaws.com']);
 let irevOsunCache = null;
 const irevOcrCache = new Map();
+const IREV_OSUN_ARCHIVE_KEY = 'irev_osun_archive_v1';
+const IREV_OSUN_OCR_KEY = 'irev_osun_ocr_v1';
+let irevArchiveLoadPromise = null;
+const ensureIrevArchiveLoaded = () => {
+  if (!irevArchiveLoadPromise) irevArchiveLoadPromise = Promise.all([
+    store.setting(IREV_OSUN_ARCHIVE_KEY, null),
+    store.setting(IREV_OSUN_OCR_KEY, {}),
+  ]).then(([archive, extractions]) => {
+    if (archive?.electionId === IREV_OSUN_ELECTION_ID && Array.isArray(archive.uploads)) {
+      irevOsunCache = { data: { ...archive, offline: true }, expiresAt: 0 };
+    }
+    for (const [id, extraction] of Object.entries(extractions || {})) {
+      if (id && Array.isArray(extraction?.results)) irevOcrCache.set(id, extraction);
+    }
+  });
+  return irevArchiveLoadPromise;
+};
 const isTrustedIrevImage = value => {
   try {
     const url = new URL(String(value || ''));
@@ -865,30 +893,46 @@ const normalizeIrevUpload = item => {
   };
 };
 const loadOsunIrevPilot = async (force = false) => {
+  await ensureIrevArchiveLoaded();
   if (!force && irevOsunCache?.expiresAt > Date.now()) return irevOsunCache.data;
-  const [stats, allUnits] = await Promise.all([
-    fetchIrevJson(`elections/${IREV_OSUN_ELECTION_ID}/result/stats`),
-    fetchIrevJson(`elections/${IREV_OSUN_ELECTION_ID}/pus`, 16 * 1024 * 1024),
-  ]);
-  const uploads = (Array.isArray(allUnits) ? allUnits : [])
-    .map(normalizeIrevUpload)
-    .filter(item => item.id && item.puCode && item.imageUrl)
-    .sort((a, b) => `${a.lga}|${a.ward}|${a.puCode}`.localeCompare(`${b.lga}|${b.ward}|${b.puCode}`));
-  const data = {
-    pilot: true,
-    state: 'Osun',
-    electionId: IREV_OSUN_ELECTION_ID,
-    electionName: sanitizeString(allUnits?.[0]?.election?.full_name || 'Osun governorship election'),
-    portalUrl: IREV_OSUN_PORTAL_URL,
-    submitted: Math.max(0, Number(stats?.documents) || 0),
-    expected: Math.max(0, Number(stats?.expected ?? stats?.pus) || 0),
-    latestUploadAt: stats?.latest?.document?.updated_at || stats?.latest?.updated_at || uploads[0]?.uploadedAt || '',
-    uploads,
-    fetchedAt: new Date().toISOString(),
-    notice: 'Official IReV upload metadata and images. AI extraction is an unverified draft until reviewed against the source image.',
-  };
-  irevOsunCache = { data, expiresAt: Date.now() + 55_000 };
-  return data;
+  try {
+    const [stats, allUnits] = await Promise.all([
+      fetchIrevJson(`elections/${IREV_OSUN_ELECTION_ID}/result/stats`),
+      fetchIrevJson(`elections/${IREV_OSUN_ELECTION_ID}/pus`, 16 * 1024 * 1024),
+    ]);
+    const liveUploads = (Array.isArray(allUnits) ? allUnits : [])
+      .map(normalizeIrevUpload)
+      .filter(item => item.id && item.puCode && item.imageUrl);
+    const mergedUploads = new Map((irevOsunCache?.data?.uploads || []).map(upload => [upload.id, upload]));
+    liveUploads.forEach(upload => mergedUploads.set(upload.id, upload));
+    const uploads = [...mergedUploads.values()].sort((a, b) => `${a.lga}|${a.ward}|${a.puCode}`.localeCompare(`${b.lga}|${b.ward}|${b.puCode}`));
+    const data = {
+      pilot: true,
+      state: 'Osun',
+      electionId: IREV_OSUN_ELECTION_ID,
+      electionName: sanitizeString(allUnits?.[0]?.election?.full_name || irevOsunCache?.data?.electionName || 'Osun governorship election'),
+      portalUrl: IREV_OSUN_PORTAL_URL,
+      submitted: Math.max(uploads.length, Number(stats?.documents) || 0),
+      expected: Math.max(0, Number(stats?.expected ?? stats?.pus) || irevOsunCache?.data?.expected || 0),
+      latestUploadAt: stats?.latest?.document?.updated_at || stats?.latest?.updated_at || liveUploads[0]?.uploadedAt || irevOsunCache?.data?.latestUploadAt || '',
+      uploads,
+      fetchedAt: new Date().toISOString(),
+      archivedAt: new Date().toISOString(),
+      offline: false,
+      notice: 'Official IReV upload metadata and images. Saved on this server for offline access.',
+    };
+    const previous = irevOsunCache?.data;
+    const changed = !previous || previous.uploads?.length !== data.uploads.length || previous.latestUploadAt !== data.latestUploadAt || previous.submitted !== data.submitted;
+    irevOsunCache = { data, expiresAt: Date.now() + 55_000 };
+    if (changed) await store.setSetting(IREV_OSUN_ARCHIVE_KEY, data);
+    return data;
+  } catch (error) {
+    if (irevOsunCache?.data?.uploads?.length) {
+      console.warn('[irev] Live source unavailable; serving persistent archive:', error.message);
+      return { ...irevOsunCache.data, offline: true, notice: 'Live IReV is unavailable. Showing the last results saved on this server.' };
+    }
+    throw error;
+  }
 };
 app.get('/api/irev/osun', auth, rateLimit, asyncRoute(async (req, res) => {
   try {
@@ -972,6 +1016,7 @@ app.post('/api/irev/osun/ocr', auth, adminOnly, rateLimit, asyncRoute(async (req
   if (!results.length) return res.status(502).json({ message: 'No readable party vote counts were extracted from this image.' });
   const extraction = { uploadId, results, provider, model, sourceUrl: upload.imageUrl, extractedAt: new Date().toISOString() };
   irevOcrCache.set(uploadId, extraction);
+  await store.setSetting(IREV_OSUN_OCR_KEY, Object.fromEntries(irevOcrCache));
   return res.json(extraction);
 }));
 app.use(['/api/news/summary', '/api/analysis/ai'], (req, _res, next) => { console.log(`[ai] request=${req.path} geminiConfigured=${Boolean(process.env.GEMINI_API_KEY)} model=${process.env.GEMINI_MODEL || 'gemini-2.0-flash'}`); next(); });
@@ -1620,4 +1665,9 @@ app.use((err, _, res, __) => {
 });
 
 if (process.env.NODE_ENV === 'production') { app.use(express.static(join(__dirname, '..', 'dist'))); app.get(/.*/, (_, res) => res.sendFile(join(__dirname, '..', 'dist', 'index.html'))); }
+const irevArchiveSync = () => loadOsunIrevPilot(true).catch(error => console.warn('[irev] Background archive update failed:', error.message));
+const irevInitialSyncTimer = setTimeout(irevArchiveSync, 2_000);
+irevInitialSyncTimer.unref?.();
+const irevArchiveSyncTimer = setInterval(irevArchiveSync, 60_000);
+irevArchiveSyncTimer.unref?.();
 server.listen(process.env.PORT || 5000, '0.0.0.0', () => console.log(`Election Monitoring Command API listening on port ${process.env.PORT || 5000}`));

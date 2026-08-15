@@ -2209,6 +2209,9 @@ function ResultsCenter({ incidents, parties = [], officers = [], mapLayers = [],
   const [irevSection, setIrevSection] = useState("uploads");
   const [irevSearch, setIrevSearch] = useState("");
   const [irevPreview, setIrevPreview] = useState(null);
+  const [compareWithIrev, setCompareWithIrev] = useState(false);
+  const [irevCompareLoading, setIrevCompareLoading] = useState(false);
+  const [fieldMismatchDetail, setFieldMismatchDetail] = useState(null);
   useEffect(() => {
     if (view !== "news" || news.length) return;
     setNewsLoading(true);
@@ -2224,8 +2227,10 @@ function ResultsCenter({ incidents, parties = [], officers = [], mapLayers = [],
         ...Object.fromEntries((pilot.uploads || []).filter((upload) => upload.extraction).map((upload) => [upload.id, upload.extraction])),
         ...current,
       }));
+      return pilot;
     } catch (error) {
       setIrevError(error.message || "The official IReV feed is unavailable.");
+      return null;
     } finally {
       setIrevLoading(false);
     }
@@ -2255,12 +2260,12 @@ function ResultsCenter({ incidents, parties = [], officers = [], mapLayers = [],
     if (canAdmin && !irevDrafts[upload.id] && irevExtractingId !== upload.id) extractIrevText(upload.id);
   };
   useEffect(() => {
-    if (view !== "irev" || !canAdmin || irevAutoStopped || !irevPilot?.uploads?.length || irevExtractingId) return undefined;
+    if ((view !== "irev" && !compareWithIrev) || !canAdmin || irevAutoStopped || !irevPilot?.uploads?.length || irevExtractingId) return undefined;
     const nextUpload = irevPilot.uploads.find((upload) => !irevDrafts[upload.id] && !irevFailedIds.has(upload.id));
     if (!nextUpload) return undefined;
     const timer = window.setTimeout(() => extractIrevText(nextUpload.id), 700);
     return () => window.clearTimeout(timer);
-  }, [view, canAdmin, irevAutoStopped, irevPilot, irevDrafts, irevExtractingId, irevFailedIds]);
+  }, [view, compareWithIrev, canAdmin, irevAutoStopped, irevPilot, irevDrafts, irevExtractingId, irevFailedIds]);
   const reports = useMemo(
     () => incidents.filter((item) => item.reportType === POLLING_RESULT_TYPE),
     [incidents],
@@ -2299,6 +2304,18 @@ function ResultsCenter({ incidents, parties = [], officers = [], mapLayers = [],
     () => resultSourceFilter ? fieldResultRows.filter((row) => row.resultSource === resultSourceFilter) : fieldResultRows,
     [fieldResultRows, resultSourceFilter],
   );
+  const normalizeResultKeyPart = (value) => String(value || "").toLowerCase().replace(/[^a-z0-9]/g, "");
+  const resultUnitKey = (row) => [row.lga, row.ward, row.pollingUnit].map(normalizeResultKeyPart).join("|");
+  const fieldRowsByUnit = useMemo(() => {
+    const units = new Map();
+    fieldResultRows.forEach((row) => {
+      const key = resultUnitKey(row);
+      if (!units.has(key)) units.set(key, {});
+      const current = units.get(key)[row.resultSource];
+      if (!current || new Date(row.createdAt).getTime() >= new Date(current.createdAt).getTime()) units.get(key)[row.resultSource] = row;
+    });
+    return units;
+  }, [fieldResultRows]);
   const filteredIrevUploads = useMemo(() => {
     const query = irevSearch.trim().toLowerCase();
     const uploads = irevPilot?.uploads || [];
@@ -2306,6 +2323,7 @@ function ResultsCenter({ incidents, parties = [], officers = [], mapLayers = [],
     return uploads.filter((upload) => [upload.puCode, upload.pollingUnit, upload.ward, upload.lga].some((value) => String(value || "").toLowerCase().includes(query)));
   }, [irevPilot, irevSearch]);
   const irevResultRows = useMemo(() => (irevPilot?.uploads || []).map((upload) => ({ ...upload, results: irevDrafts[upload.id]?.results || [] })).filter((upload) => upload.results.length), [irevPilot, irevDrafts]);
+  const irevRowsByUnit = useMemo(() => new Map(irevResultRows.map((row) => [resultUnitKey(row), row])), [irevResultRows]);
   const irevOnlyTotals = useMemo(() => irevResultRows.reduce((totals, upload) => {
     upload.results.forEach(({ party, votes }) => { totals[party] = (totals[party] || 0) + Number(votes || 0); });
     return totals;
@@ -2436,6 +2454,30 @@ function ResultsCenter({ incidents, parties = [], officers = [], mapLayers = [],
       setOutlookLoading(false);
     }
   };
+  const toggleIrevComparison = async () => {
+    if (compareWithIrev) return setCompareWithIrev(false);
+    setIrevCompareLoading(true);
+    const pilot = await loadIrevPilot();
+    setIrevCompareLoading(false);
+    if (pilot) setCompareWithIrev(true);
+  };
+  const partyVoteFor = (row, party) => Number(row?.results?.find((result) => normalizeResultKeyPart(result.party) === normalizeResultKeyPart(party))?.votes || 0);
+  const renderFieldVote = (row, party) => {
+    const ownVotes = partyVoteFor(row, party);
+    const pair = fieldRowsByUnit.get(resultUnitKey(row)) || {};
+    const hasBothFieldSources = Boolean(pair.Agent && pair.Supervisor);
+    const agentVotes = partyVoteFor(pair.Agent, party);
+    const supervisorVotes = partyVoteFor(pair.Supervisor, party);
+    const fieldMismatch = hasBothFieldSources && agentVotes !== supervisorVotes;
+    const irevRow = irevRowsByUnit.get(resultUnitKey(row));
+    const irevParty = irevRow?.results?.find((result) => normalizeResultKeyPart(result.party) === normalizeResultKeyPart(party));
+    const irevVotes = Number(irevParty?.votes || 0);
+    const irevMismatch = compareWithIrev && irevParty && ownVotes !== irevVotes;
+    const count = <><strong>{ownVotes.toLocaleString()}</strong>{irevMismatch && <small className="irev-count-mismatch">IReV: {irevVotes.toLocaleString()}</small>}</>;
+    return fieldMismatch
+      ? <button type="button" className="field-count-mismatch" onClick={() => setFieldMismatchDetail({ pollingUnit: row.pollingUnit, lga: row.lga, ward: row.ward, party, agentVotes, supervisorVotes })}>{count}</button>
+      : <span className="field-count-match">{count}</span>;
+  };
   return (
     <div className="results-center">
       <header className="results-center-head">
@@ -2510,19 +2552,20 @@ function ResultsCenter({ incidents, parties = [], officers = [], mapLayers = [],
           {fieldTopParties.map(party => <article className="result-total-card" key={party}><span>{party}</span><strong>{fieldResultTotals[party].toLocaleString()}</strong></article>)}
         </section>
         <section className="result-table-card">
-          <div className="result-table-title"><div><h2>Polling-unit breakdown</h2><p>{resultSourceFilter ? `${resultSourceFilter} submissions only. Select the active source card again to show all.` : "Agent and Supervisor counts with field evidence."}</p></div><b>{displayedResultRows.length} shown</b></div>
+          <div className="result-table-title"><div><h2>Polling-unit breakdown</h2><p>{resultSourceFilter ? `${resultSourceFilter} submissions only. Select the active source card again to show all.` : "Agent and Supervisor counts with field evidence."}</p></div><div className="result-compare-actions"><button type="button" className={compareWithIrev ? "irev-compare-btn active" : "irev-compare-btn"} disabled={irevCompareLoading} onClick={toggleIrevComparison}>{irevCompareLoading ? "Loading IReV…" : compareWithIrev ? "IReV comparison on" : "Compare with IReV"}</button><b>{displayedResultRows.length} shown</b></div></div>
           <div className="result-table-scroll">
             <table className="result-progress-table">
               <thead><tr><th>Source</th><th>LGA</th><th>Ward</th><th>Polling unit</th>{fieldTopParties.map(party => <th key={party}>{party}</th>)}<th>Location</th><th>Evidence</th><th>Uploaded</th></tr></thead>
               <tbody>
                 {displayedResultRows.map((row) => (
-                  <tr key={row.id}><td><span className={`result-source-badge source-${row.resultSource.toLowerCase().replace(/[^a-z]+/g, "-")}`}>{row.resultSource}</span></td><td>{row.lga || "—"}</td><td>{row.ward || "—"}</td><td><b>{row.pollingUnit || "—"}</b></td>{fieldTopParties.map(party => <td key={party}><strong>{Number(row.results.find(item => item.party === party)?.votes || 0).toLocaleString()}</strong></td>)}<td>{Number(row.lat).toFixed(5)}, {Number(row.lng).toFixed(5)}</td><td><div className="result-evidence">{(row.media || []).filter((item) => item.type === "image").slice(0, 2).map((item, index) => <a href={item.data} target="_blank" rel="noreferrer" key={`${row.id}-${index}`}><img src={item.data} alt={`Evidence for ${row.pollingUnit}`} /></a>)}</div></td><td>{new Date(row.createdAt).toLocaleString()}</td></tr>
+                  <tr key={row.id}><td><span className={`result-source-badge source-${row.resultSource.toLowerCase().replace(/[^a-z]+/g, "-")}`}>{row.resultSource}</span></td><td>{row.lga || "—"}</td><td>{row.ward || "—"}</td><td><b>{row.pollingUnit || "—"}</b></td>{fieldTopParties.map(party => <td key={party}>{renderFieldVote(row, party)}</td>)}<td>{Number(row.lat).toFixed(5)}, {Number(row.lng).toFixed(5)}</td><td><div className="result-evidence">{(row.media || []).filter((item) => item.type === "image").slice(0, 2).map((item, index) => <a href={item.data} target="_blank" rel="noreferrer" key={`${row.id}-${index}`}><img src={item.data} alt={`Evidence for ${row.pollingUnit}`} /></a>)}</div></td><td>{new Date(row.createdAt).toLocaleString()}</td></tr>
                 ))}
                 {!displayedResultRows.length && <tr><td className="result-empty" colSpan={fieldTopParties.length + 8}>No {resultSourceFilter || "polling-unit"} results have been uploaded yet.</td></tr>}
               </tbody>
             </table>
           </div>
         </section>
+        {fieldMismatchDetail && <div className="field-mismatch-backdrop" onClick={() => setFieldMismatchDetail(null)}><section className="field-mismatch-modal" onClick={(event) => event.stopPropagation()}><header><div><span>{fieldMismatchDetail.lga} · {fieldMismatchDetail.ward}</span><h3>{fieldMismatchDetail.pollingUnit}</h3></div><button type="button" onClick={() => setFieldMismatchDetail(null)} aria-label="Close comparison"><FaTimes /></button></header><h4>{fieldMismatchDetail.party}</h4><div><article><span>Agent reported</span><strong>{fieldMismatchDetail.agentVotes.toLocaleString()}</strong></article><article><span>Supervisor reported</span><strong>{fieldMismatchDetail.supervisorVotes.toLocaleString()}</strong></article></div></section></div>}
         </>}
       </main>
     </div>
