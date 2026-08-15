@@ -76,189 +76,187 @@ export default function ToolsPanel({
   onPassword,
 }) {
   return (
-    <div className="modal-backdrop">
-      <section className="modal tools-modal">
-        <div className="panel-title">
-          <div>
-            <span className="eyebrow">COMMAND TOOLS</span>
-            <h2>Actions</h2>
-          </div>
-          <button className="icon-btn" onClick={onClose}>
-            <FaTimes />
-          </button>
+    <div className="sidebar-tools-dropdown">
+      <div className="sidebar-panel-head">
+        <div>
+          <span className="eyebrow">COMMAND TOOLS</span>
+          <h2>Actions</h2>
         </div>
-        <div className="tools-grid">
+        <button className="icon-btn" onClick={onClose}>
+          <FaTimes />
+        </button>
+      </div>
+      <div className="sidebar-tools-grid">
+        <button
+          className={drawMode === "measure" ? "active" : ""}
+          onClick={() => {
+            onMeasure();
+            onClose();
+          }}
+        >
+          <b>
+            <FaRulerCombined /> Measure
+          </b>
+          <span>Measure distance on the map</span>
+        </button>
+        <button
+          className={drawMode === "route" ? "active" : ""}
+          onClick={() => {
+            onRoute();
+            onClose();
+          }}
+        >
+          <b>
+            <FaRoute /> Route
+          </b>
+          <span>Pick a start and destination</span>
+        </button>
+        {canCreateIncidentAreas && (
           <button
-            className={drawMode === "measure" ? "active" : ""}
+            className={drawMode === "circle" ? "active" : ""}
             onClick={() => {
-              onMeasure();
+              onCircleReport();
               onClose();
             }}
           >
             <b>
-              <FaRulerCombined /> Measure
+              <FaCircle /> Circle Incident
             </b>
-            <span>Measure distance on the map</span>
+            <span>Create incident from a radius</span>
           </button>
+        )}
+        {canCreateIncidentAreas && (
           <button
-            className={drawMode === "route" ? "active" : ""}
+            className={drawMode === "freehand" ? "active" : ""}
             onClick={() => {
-              onRoute();
+              onFreehandReport();
               onClose();
             }}
           >
             <b>
-              <FaRoute /> Route
+              <FaDrawPolygon /> Freehand Incident
             </b>
-            <span>Pick a start and destination</span>
+            <span>Draw an incident area by hand</span>
           </button>
-          {canCreateIncidentAreas && (
-            <button
-              className={drawMode === "circle" ? "active" : ""}
-              onClick={() => {
-                onCircleReport();
-                onClose();
-              }}
-            >
-              <b>
-                <FaCircle /> Circle Incident
-              </b>
-              <span>Create incident from a radius</span>
-            </button>
-          )}
-          {canCreateIncidentAreas && (
-            <button
-              className={drawMode === "freehand" ? "active" : ""}
-              onClick={() => {
-                onFreehandReport();
-                onClose();
-              }}
-            >
-              <b>
-                <FaDrawPolygon /> Freehand Incident
-              </b>
-              <span>Draw an incident area by hand</span>
-            </button>
-          )}
-          {hasMapTools && (
-            <button
-              className="danger-tool"
-              onClick={() => {
-                onClearMapTools();
-                onClose();
-              }}
-            >
-              <b>
-                <FaTools /> Clear Tools
-              </b>
-              <span>Remove active map tool overlays</span>
-            </button>
-          )}
-          {hasAreas && (
-            <button
-              onClick={() => {
-                onShareAreas();
-                onClose();
-              }}
-            >
-              <b>
-                <FaMapMarkedAlt /> Share Area
-              </b>
-              <span>Share the latest drawn area</span>
-            </button>
-          )}
-          {hasAreas && (
-            <button
-              className="danger-tool"
-              onClick={() => {
-                onClearAreas();
-                onClose();
-              }}
-            >
-              <b>
-                <FaTools /> Clear Areas
-              </b>
-              <span>Remove drawn operational areas</span>
-            </button>
-          )}
-          {canAdmin && (
-            <button
-              onClick={() => {
-                onClose();
-                onMapData();
-              }}
-            >
-              <b>
-                <FaMapMarkedAlt /> Map Data
-              </b>
-              <span>
-                {isSuperAdmin
-                  ? `${mapLayerCount} layers - upload/edit`
-                  : `${mapLayerCount} layers - edit styles`}
-              </span>
-            </button>
-          )}
-          {canManagePersonnel && (
-            <button
-              onClick={() => {
-                onClose();
-                onManageOfficers();
-              }}
-            >
-              <b>
-                <FaUserCog /> Manage Users
-              </b>
-              <span>Create lower-rank accounts</span>
-            </button>
-          )}
-          <button onClick={onGps}>
-            <b>
-              <FaBullseye /> {sharingGps ? "Stop GPS" : "Share GPS"}
-            </b>
-            <span>Live field location</span>
-          </button>
-          <button onClick={onCameraShare}>
-            <b>
-              <FaVideo /> {sharingCamera ? "Stop Camera" : "Share Camera"}
-            </b>
-            <span>Phone camera feed</span>
-          </button>
+        )}
+        {hasMapTools && (
           <button
+            className="danger-tool"
             onClick={() => {
+              onClearMapTools();
               onClose();
-              onCameras();
             }}
           >
             <b>
-              <FaCamera /> Cameras Available
+              <FaTools /> Clear Tools
             </b>
-            <span>{cameraCount} feeds</span>
+            <span>Remove active map tool overlays</span>
           </button>
+        )}
+        {hasAreas && (
           <button
             onClick={() => {
+              onShareAreas();
               onClose();
-              onChat();
             }}
           >
             <b>
-              <FaComments /> Chat
+              <FaMapMarkedAlt /> Share Area
             </b>
-            <span>{chatCount} rooms</span>
+            <span>Share the latest drawn area</span>
           </button>
-          <button onClick={onRefresh}>
+        )}
+        {hasAreas && (
+          <button
+            className="danger-tool"
+            onClick={() => {
+              onClearAreas();
+              onClose();
+            }}
+          >
             <b>
-              <FaSyncAlt /> {updateReady ? "Update Ready" : "Update App"}
+              <FaTools /> Clear Areas
             </b>
-            <span>Refresh latest version</span>
+            <span>Remove drawn operational areas</span>
           </button>
-          <button onClick={onPassword}>
+        )}
+        {canAdmin && (
+          <button
+            onClick={() => {
+              onClose();
+              onMapData();
+            }}
+          >
             <b>
-              <FaKey /> Change Password
+              <FaMapMarkedAlt /> Map Data
             </b>
-            <span>Your own account</span>
+            <span>
+              {isSuperAdmin
+                ? `${mapLayerCount} layers - upload/edit`
+                : `${mapLayerCount} layers - edit styles`}
+            </span>
           </button>
-        </div>
-      </section>
+        )}
+        {canManagePersonnel && (
+          <button
+            onClick={() => {
+              onClose();
+              onManageOfficers();
+            }}
+          >
+            <b>
+              <FaUserCog /> Manage Users
+            </b>
+            <span>Create lower-rank accounts</span>
+          </button>
+        )}
+        <button onClick={onGps}>
+          <b>
+            <FaBullseye /> {sharingGps ? "Stop GPS" : "Share GPS"}
+          </b>
+          <span>Live field location</span>
+        </button>
+        <button onClick={onCameraShare}>
+          <b>
+            <FaVideo /> {sharingCamera ? "Stop Camera" : "Share Camera"}
+          </b>
+          <span>Phone camera feed</span>
+        </button>
+        <button
+          onClick={() => {
+            onClose();
+            onCameras();
+          }}
+        >
+          <b>
+            <FaCamera /> Cameras Available
+          </b>
+          <span>{cameraCount} feeds</span>
+        </button>
+        <button
+          onClick={() => {
+            onClose();
+            onChat();
+          }}
+        >
+          <b>
+            <FaComments /> Chat
+          </b>
+          <span>{chatCount} rooms</span>
+        </button>
+        <button onClick={onRefresh}>
+          <b>
+            <FaSyncAlt /> {updateReady ? "Update Ready" : "Update App"}
+          </b>
+          <span>Refresh latest version</span>
+        </button>
+        <button onClick={onPassword}>
+          <b>
+            <FaKey /> Change Password
+          </b>
+          <span>Your own account</span>
+        </button>
+      </div>
     </div>
   );
 }
