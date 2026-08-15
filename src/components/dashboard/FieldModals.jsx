@@ -50,6 +50,7 @@ import {
   NIGERIA_STATES,
   POLLING_UNITS,
   STATE_CODE_TO_NAME,
+  UNIT_TYPES,
   normalizeRegistrationState,
   getRegistrationLocationOptions,
 } from "../../../shared/electionData.js";
@@ -637,111 +638,191 @@ export function OfficerManager({
   onPassword,
   onRoleChange,
 }) {
-    const isSupervisor = currentUser.role === "Supervisor";
-    const manageableRoles = currentUser.role === "Super Admin"
-      ? ["Admin", "Response Team", "Supervisor", "Agent"]
-      : ["Response Team", "Supervisor", "Agent"];
-    const canEditAssignment = (user) => {
-      if (user.role !== "Agent") return false;
-      if (currentUser.role === "Super Admin" || currentUser.role === "Admin") return true;
-      if (isSupervisor) {
-        return (
-          user.state === currentUser.state &&
-          user.lga === currentUser.lga &&
-          user.ward === currentUser.ward
-        );
-      }
-      return false;
-    };
-    const defaultRole = manageableRoles[manageableRoles.length - 1];
-    const stateOptions = useMemo(
-      () => NIGERIA_STATES.map((stateCode) => ({
-        code: stateCode,
-        label: STATE_CODE_TO_NAME[stateCode] || stateCode,
-      })),
-      [],
-    );
-    const initialLocationOptions = getRegistrationLocationOptions(DEFAULT_REGISTRATION_STATE);
-    const emptyForm = {
-      id: "",
-      name: "",
-      email: "",
-      password: "",
-      rank: defaultRole,
-      unit: "Field Team",
-      unitType: "Field Team",
-      command: "Kwara State Election Operations",
-      division: "",
-      station: "",
-      state: isSupervisor ? currentUser.state : DEFAULT_REGISTRATION_STATE,
-      lga: isSupervisor ? currentUser.lga : initialLocationOptions.lgas[0] || "",
-      ward: isSupervisor ? currentUser.ward : initialLocationOptions.wards[0] || "",
-      pollingUnit: isSupervisor
-        ? currentUser.pollingUnit || initialLocationOptions.pollingUnits[0] || ""
-        : initialLocationOptions.pollingUnits[0] || "",
-      lat: "7.3775",
-      lng: "3.9470",
-      role: defaultRole,
-    };
-    const [form, setForm] = useState(emptyForm);
-    const locationOptions = useMemo(
-      () => getRegistrationLocationOptions(form.state, form.lga, form.ward),
-      [form.state, form.lga, form.ward],
-    );
+  const isSupervisor = currentUser.role === "Supervisor";
+  const canManageRoles = ["Super Admin", "Admin"].includes(currentUser.role);
+  const manageableRoles = currentUser.role === "Super Admin"
+    ? ["Admin", "Response Team", "Supervisor", "Agent"]
+    : ["Response Team", "Supervisor", "Agent"];
+  const defaultRole = manageableRoles[manageableRoles.length - 1];
+  const stateOptions = useMemo(
+    () => NIGERIA_STATES.map((code) => ({ code, label: STATE_CODE_TO_NAME[code] || code })),
+    [],
+  );
+  const initialLocations = getRegistrationLocationOptions(
+    isSupervisor ? currentUser.state : DEFAULT_REGISTRATION_STATE,
+    isSupervisor ? currentUser.lga : undefined,
+    isSupervisor ? currentUser.ward : undefined,
+  );
+  const newAccountForm = () => ({
+    id: "",
+    name: "",
+    email: "",
+    password: "",
+    rank: defaultRole,
+    unit: "Field Team",
+    unitType: "Field Team",
+    command: "Kwara State Election Operations",
+    division: "",
+    station: "",
+    state: isSupervisor ? currentUser.state : DEFAULT_REGISTRATION_STATE,
+    lga: isSupervisor ? currentUser.lga : initialLocations.lgas[0] || "",
+    ward: isSupervisor ? currentUser.ward : initialLocations.wards[0] || "",
+    pollingUnit: isSupervisor
+      ? currentUser.pollingUnit || initialLocations.pollingUnits[0] || ""
+      : initialLocations.pollingUnits[0] || "",
+    lat: String(currentUser.lat || "8.4799"),
+    lng: String(currentUser.lng || "4.5418"),
+    role: defaultRole,
+  });
+  const [form, setForm] = useState(newAccountForm);
+  const [managerTab, setManagerTab] = useState("create");
+  const [error, setError] = useState("");
+  const [roleChangeUser, setRoleChangeUser] = useState(null);
+  const [roleChangeForm, setRoleChangeForm] = useState({ role: "", state: "", lga: "", ward: "" });
+  const [roleChangeError, setRoleChangeError] = useState("");
+  const locationOptions = useMemo(
+    () => getRegistrationLocationOptions(form.state, form.lga, form.ward),
+    [form.state, form.lga, form.ward],
+  );
+  const isEditing = Boolean(form.id);
 
-    const handleStateChange = (value) => {
-      const nextState = normalizeRegistrationState(value);
-      const nextOptions = getRegistrationLocationOptions(nextState);
-      const nextLga = nextOptions.lgas[0] || "";
-      const nextWard = nextOptions.wards[0] || "";
-      const nextPollingOptions = getRegistrationLocationOptions(nextState, nextLga, nextWard).pollingUnits;
-      setForm((prev) => ({
-        ...prev,
-        state: nextState,
-        lga: nextLga,
-        ward: nextWard,
-        pollingUnit: nextPollingOptions[0] || "",
-      }));
-    };
+  const resetForm = () => {
+    setForm(newAccountForm());
+    setError("");
+  };
+  const canEditAssignment = (user) => {
+    if (user.role !== "Agent") return false;
+    if (canManageRoles) return true;
+    return isSupervisor && user.state === currentUser.state && user.lga === currentUser.lga && user.ward === currentUser.ward;
+  };
+  const handleStateChange = (value) => {
+    const state = normalizeRegistrationState(value);
+    const options = getRegistrationLocationOptions(state);
+    const lga = options.lgas[0] || "";
+    const ward = getRegistrationLocationOptions(state, lga).wards[0] || "";
+    const pollingUnit = getRegistrationLocationOptions(state, lga, ward).pollingUnits[0] || "";
+    setForm((current) => ({ ...current, state, lga, ward, pollingUnit }));
+  };
+  const handleLgaChange = (lga) => {
+    const options = getRegistrationLocationOptions(form.state, lga);
+    const ward = options.wards.includes(form.ward) ? form.ward : options.wards[0] || "";
+    const units = getRegistrationLocationOptions(form.state, lga, ward).pollingUnits;
+    setForm((current) => ({ ...current, lga, ward, pollingUnit: units.includes(current.pollingUnit) ? current.pollingUnit : units[0] || "" }));
+  };
+  const handleWardChange = (ward) => {
+    const units = getRegistrationLocationOptions(form.state, form.lga, ward).pollingUnits;
+    setForm((current) => ({ ...current, ward, pollingUnit: units.includes(current.pollingUnit) ? current.pollingUnit : units[0] || "" }));
+  };
+  const submit = async (event) => {
+    event.preventDefault();
+    setError("");
+    try {
+      if (isEditing) await onUpdate(form);
+      else await onCreate(form);
+      resetForm();
+      if (isEditing) setManagerTab("list");
+    } catch (submitError) {
+      setError(submitError.message || "Unable to save this user");
+    }
+  };
+  const editAssignment = (user) => {
+    setForm({ ...newAccountForm(), ...user, password: "", lat: String(user.lat || ""), lng: String(user.lng || "") });
+    setManagerTab("create");
+    setError("");
+  };
+  const resetPassword = async (user) => {
+    const password = window.prompt(`Enter a new password for ${user.name}. Use at least 12 characters with uppercase, lowercase, number, and special character.`);
+    if (!password) return;
+    setError("");
+    try {
+      await onPassword(user, password);
+    } catch (passwordError) {
+      setError(passwordError.message || "Unable to reset the password");
+    }
+  };
+  const openRoleChange = (user) => {
+    setRoleChangeUser(user);
+    setRoleChangeForm({ role: user.role, state: user.state || DEFAULT_REGISTRATION_STATE, lga: user.lga || "", ward: user.ward || "" });
+    setRoleChangeError("");
+  };
+  const submitRoleChange = async () => {
+    setRoleChangeError("");
+    try {
+      await onRoleChange(roleChangeUser, roleChangeForm);
+      setRoleChangeUser(null);
+    } catch (roleError) {
+      setRoleChangeError(roleError.message || "Unable to update this role");
+    }
+  };
 
-    const handleSubmit = async (e) => {
-      e.preventDefault();
-      if (form.id) {
-        await onUpdate(form);
-      } else {
-        await onCreate(form);
-      }
-      setForm(emptyForm);
-    };
-
-    return (
-      <div className="modal-backdrop">
-        <div className="modal officer-manager-modal">
-          <div className="panel-title">
-            <div><span className="eyebrow">PERSONNEL</span><h2>Manage officers</h2></div>
-            <button type="button" className="icon-btn" onClick={onClose}><FaTimes /></button>
-          </div>
-          <form onSubmit={handleSubmit} className="officer-form-grid">
-            <label>Full name<input value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} required /></label>
-            <label>Email<input type="email" value={form.email} onChange={(e) => setForm({ ...form, email: e.target.value })} required /></label>
-            <label>Password<input type="password" value={form.password} onChange={(e) => setForm({ ...form, password: e.target.value })} placeholder={form.id ? "Leave blank to keep current" : "Set password"} /></label>
-            <label>Role<select value={form.role} onChange={(e) => setForm({ ...form, role: e.target.value })}>{manageableRoles.map((role) => <option key={role}>{role}</option>)}</select></label>
-            <label>Rank<input value={form.rank} onChange={(e) => setForm({ ...form, rank: e.target.value })} /></label>
-            <label>Unit<input value={form.unit} onChange={(e) => setForm({ ...form, unit: e.target.value })} /></label>
-            <label>Unit type<input value={form.unitType} onChange={(e) => setForm({ ...form, unitType: e.target.value })} /></label>
-            <label>Station<input value={form.station} onChange={(e) => setForm({ ...form, station: e.target.value })} /></label>
-            <label>State<select value={form.state} onChange={(e) => handleStateChange(e.target.value)}>{stateOptions.map((state) => <option key={state.code} value={state.code}>{state.label}</option>)}</select></label>
-            <label>LGA<select value={form.lga} onChange={(e) => setForm((prev) => ({ ...prev, lga: e.target.value, ward: locationOptions.wards[0] || "", pollingUnit: getRegistrationLocationOptions(form.state, e.target.value, locationOptions.wards[0] || "").pollingUnits[0] || "" }))}>{(getRegistrationLocationOptions(form.state).lgas || []).map((lga) => <option key={lga}>{lga}</option>)}</select></label>
-            <label>Ward<select value={form.ward} onChange={(e) => setForm((prev) => ({ ...prev, ward: e.target.value, pollingUnit: getRegistrationLocationOptions(form.state, prev.lga, e.target.value).pollingUnits[0] || "" }))}>{(getRegistrationLocationOptions(form.state, form.lga).wards || []).map((ward) => <option key={ward}>{ward}</option>)}</select></label>
-            <label>Polling unit<select value={form.pollingUnit} onChange={(e) => setForm({ ...form, pollingUnit: e.target.value })}>{(locationOptions.pollingUnits || []).map((unit) => <option key={unit}>{unit}</option>)}</select></label>
-            <label>Latitude<input value={form.lat} onChange={(e) => setForm({ ...form, lat: e.target.value })} /></label>
-            <label>Longitude<input value={form.lng} onChange={(e) => setForm({ ...form, lng: e.target.value })} /></label>
-            <div className="actions" style={{ gridColumn: "1 / -1" }}>
-              <button type="button" className="ghost" onClick={onClose}>Cancel</button>
-              <button type="submit" className="primary">{form.id ? "Save changes" : "Create officer"}</button>
-            </div>
-          </form>
+  return (
+    <div className="modal-backdrop">
+      <section className="modal officer-modal">
+        <div className="panel-title">
+          <div><span className="eyebrow">PERSONNEL</span><h2>Manage users</h2></div>
+          <button type="button" className="icon-btn" onClick={onClose} aria-label="Close user manager"><FaTimes /></button>
         </div>
-      </div>
-    );
+        <div className="personnel-tabs" role="tablist" aria-label="User management">
+          <button type="button" className={managerTab === "create" ? "active" : ""} onClick={() => setManagerTab("create")}>{isEditing ? "Edit account" : "Create account"}</button>
+          <button type="button" className={managerTab === "list" ? "active" : ""} onClick={() => setManagerTab("list")}>Existing users ({users.filter((user) => user.role !== "Super Admin").length})</button>
+        </div>
+
+        {managerTab === "list" && (
+          <div className="manage-list">
+            {roleChangeUser && (
+              <div className="role-change-panel">
+                <div className="role-change-header"><b>Change role or ward: {roleChangeUser.name}</b><button type="button" className="icon-btn" onClick={() => setRoleChangeUser(null)}><FaTimes /></button></div>
+                <div className="role-change-fields">
+                  <label>Role<select value={roleChangeForm.role} onChange={(event) => setRoleChangeForm((current) => ({ ...current, role: event.target.value }))}><option value="Supervisor">Supervisor</option><option value="Agent">Agent</option></select></label>
+                  <label>State<select value={roleChangeForm.state} onChange={(event) => { const state = normalizeRegistrationState(event.target.value); const options = getRegistrationLocationOptions(state); const lga = options.lgas[0] || ""; setRoleChangeForm((current) => ({ ...current, state, lga, ward: getRegistrationLocationOptions(state, lga).wards[0] || "" })); }}>{stateOptions.map((state) => <option key={state.code} value={state.code}>{state.label}</option>)}</select></label>
+                  <label>LGA<select value={roleChangeForm.lga} onChange={(event) => { const lga = event.target.value; setRoleChangeForm((current) => ({ ...current, lga, ward: getRegistrationLocationOptions(current.state, lga).wards[0] || "" })); }}>{getRegistrationLocationOptions(roleChangeForm.state).lgas.map((lga) => <option key={lga}>{lga}</option>)}</select></label>
+                  <label>Ward<select value={roleChangeForm.ward} onChange={(event) => setRoleChangeForm((current) => ({ ...current, ward: event.target.value }))}>{getRegistrationLocationOptions(roleChangeForm.state, roleChangeForm.lga).wards.map((ward) => <option key={ward}>{ward}</option>)}</select></label>
+                </div>
+                {roleChangeError && <div className="error">{roleChangeError}</div>}
+                <div className="role-change-actions"><button type="button" className="primary" onClick={submitRoleChange}>Save changes</button><button type="button" className="ghost" onClick={() => setRoleChangeUser(null)}>Cancel</button></div>
+              </div>
+            )}
+            {error && <div className="error">{error}</div>}
+            {users.filter((user) => user.role !== "Super Admin").map((user) => (
+              <div className="manage-row" key={user.id}>
+                <div className="avatar">{user.name.split(" ").map((part) => part[0]).join("").slice(0, 2)}</div>
+                <div className="manage-user-summary"><b>{user.rank ? `${user.rank} ${user.name}` : user.name}</b><small>{user.role} · {user.email}<br />{STATE_CODE_TO_NAME[user.state] || user.state || "No state"} · {user.lga || "No LGA"} · {user.ward || "No ward"} · {user.pollingUnit || user.unit || "No assignment"}</small></div>
+                <div className="manage-user-actions">
+                  <button type="button" className="unit-action-btn" onClick={() => resetPassword(user)}>Password</button>
+                  {canEditAssignment(user) && <button type="button" className="unit-action-btn" onClick={() => editAssignment(user)}>Edit assignment</button>}
+                  {canManageRoles && ["Supervisor", "Agent"].includes(user.role) && <button type="button" className="unit-action-btn role-change-btn" onClick={() => openRoleChange(user)}>{user.role === "Supervisor" ? "Demote / Ward" : "Promote / Ward"}</button>}
+                  <button type="button" className="delete-btn" onClick={() => onDelete(user)}>Delete</button>
+                </div>
+              </div>
+            ))}
+            {!users.some((user) => user.role !== "Super Admin") && <p className="muted">No manageable users are available.</p>}
+          </div>
+        )}
+
+        {managerTab === "create" && (
+          <form className="personnel-create-form" onSubmit={submit}>
+            <h3>{isEditing ? "Edit agent assignment" : "Create personnel account"}</h3>
+            <div className="officer-form-grid">
+              <label>Full name<input required value={form.name} onChange={(event) => setForm({ ...form, name: event.target.value })} /></label>
+              <label>Email<input required type="email" value={form.email} onChange={(event) => setForm({ ...form, email: event.target.value })} /></label>
+              {canManageRoles && !isEditing && <label>System role<select value={form.role} onChange={(event) => setForm({ ...form, role: event.target.value, rank: event.target.value })}>{manageableRoles.map((role) => <option key={role}>{role}</option>)}</select></label>}
+              <label>Deployment team<select required value={form.unitType} onChange={(event) => setForm({ ...form, unitType: event.target.value, unit: event.target.value })}>{UNIT_TYPES.map((type) => <option key={type}>{type}</option>)}</select></label>
+              <label>State<select required value={form.state} onChange={(event) => handleStateChange(event.target.value)} disabled={isSupervisor}>{stateOptions.map((state) => <option key={state.code} value={state.code}>{state.label}</option>)}</select></label>
+              <label>LGA<select required value={form.lga} onChange={(event) => handleLgaChange(event.target.value)} disabled={isSupervisor}>{getRegistrationLocationOptions(form.state).lgas.map((lga) => <option key={lga}>{lga}</option>)}</select></label>
+              <label>Ward / supervisor zone<select required value={form.ward} onChange={(event) => handleWardChange(event.target.value)} disabled={isSupervisor}>{getRegistrationLocationOptions(form.state, form.lga).wards.map((ward) => <option key={ward}>{ward}</option>)}</select></label>
+              <label>Polling unit {form.role === "Supervisor" ? "(optional)" : "assignment"}<select required={form.role === "Agent"} value={form.pollingUnit} onChange={(event) => setForm({ ...form, pollingUnit: event.target.value })}><option value="">All units in ward</option>{locationOptions.pollingUnits.map((unit) => <option key={unit}>{unit}</option>)}</select></label>
+              <label>Unit / team name<input required value={form.unit} onChange={(event) => setForm({ ...form, unit: event.target.value })} disabled={isEditing} /></label>
+              <label>Contact / call sign<input required value={form.station} onChange={(event) => setForm({ ...form, station: event.target.value })} /></label>
+              {!isEditing && <label>Password<input required minLength="12" type="password" title="At least 12 characters with uppercase, lowercase, number, and special character" value={form.password} onChange={(event) => setForm({ ...form, password: event.target.value })} /></label>}
+              <label>Initial latitude<input required value={form.lat} onChange={(event) => setForm({ ...form, lat: event.target.value })} /></label>
+              <label>Initial longitude<input required value={form.lng} onChange={(event) => setForm({ ...form, lng: event.target.value })} /></label>
+            </div>
+            <div className="location-summary"><strong>Selected assignment</strong><span>{STATE_CODE_TO_NAME[form.state] || form.state} · {form.lga || "No LGA"} · {form.ward || "No ward"} · {form.pollingUnit || "All units"}</span></div>
+            {error && <div className="error">{error}</div>}
+            <div className="form-actions"><button className="primary" disabled={!manageableRoles.length}>{isEditing ? "Save changes" : "Create account"}</button>{isEditing && <button type="button" className="ghost" onClick={() => { resetForm(); setManagerTab("list"); }}>Cancel edit</button>}</div>
+          </form>
+        )}
+      </section>
+    </div>
+  );
 }

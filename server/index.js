@@ -1160,7 +1160,9 @@ app.put('/api/users/:id/role', auth, adminOnly, rateLimit, asyncRoute(async (req
   const changes = {
     name: target.name, email: target.email, role: newRole, rank: newRole, active: target.active,
     unit: target.unit, unitType: target.unitType, command: target.command, division: target.division,
-    station: target.station, state: target.state, lga: target.lga,
+    station: target.station,
+    state: req.body.state ? String(req.body.state).trim() : target.state,
+    lga: req.body.lga ? String(req.body.lga).trim() : target.lga,
     ward: req.body.ward ? String(req.body.ward).trim() : target.ward,
     pollingUnit: newRole === 'Supervisor' ? (target.pollingUnit || '') : (req.body.pollingUnit ? String(req.body.pollingUnit).trim() : target.pollingUnit),
     lat: target.lat, lng: target.lng,
