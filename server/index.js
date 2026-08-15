@@ -820,6 +820,124 @@ app.get('/api/boundaries/kwara', rateLimit, asyncRoute(async (_req, res) => {
     return res.status(503).json({ message: 'Kwara boundary data is temporarily unavailable.' });
   }
 }));
+const IREV_API_ORIGIN = 'https://dolphin-app-sleqh.ondigitalocean.app';
+const IREV_OSUN_ELECTION_ID = '6a7f788adcbc755a763f082a';
+const IREV_OSUN_PORTAL_URL = `https://irev.inecnigeria.org/elections/${IREV_OSUN_ELECTION_ID}`;
+const IREV_IMAGE_HOSTS = new Set(['inc-s3-cache.incportals.com', 'etransmission-result-docs.s3.eu-west-2.amazonaws.com']);
+let irevOsunCache = null;
+const isTrustedIrevImage = value => {
+  try {
+    const url = new URL(String(value || ''));
+    return url.protocol === 'https:' && !url.username && !url.password && IREV_IMAGE_HOSTS.has(url.hostname);
+  } catch {
+    return false;
+  }
+};
+const fetchIrevJson = async path => {
+  const response = await fetch(`${IREV_API_ORIGIN}/api/v1/${path}`, {
+    headers: { Accept: 'application/json', 'User-Agent': 'Election-Monitor/1.0 IReV public-feed pilot' },
+    signal: AbortSignal.timeout(15_000),
+  });
+  if (!response.ok) throw new Error(`IReV returned ${response.status}`);
+  const contentLength = Number(response.headers.get('content-length') || 0);
+  if (contentLength > 8 * 1024 * 1024) throw new Error('IReV response is too large');
+  const payload = await response.json();
+  if (!payload?.success) throw new Error('IReV returned an invalid response');
+  return payload.data;
+};
+const normalizeIrevUpload = item => {
+  const pollingUnit = item?.polling_unit || {};
+  const imageUrl = item?.document?.url || '';
+  return {
+    id: sanitizeString(item?._id || ''),
+    puCode: sanitizeString(item?.pu_code || pollingUnit.pu_code || ''),
+    pollingUnit: sanitizeString(item?.name || pollingUnit.name || ''),
+    lga: sanitizeString(pollingUnit?.lga?.name || ''),
+    ward: sanitizeString(pollingUnit?.ward?.name || ''),
+    uploadedAt: item?.document?.updated_at || item?.updated_at || '',
+    imageUrl: isTrustedIrevImage(imageUrl) ? imageUrl : '',
+    sourceUrl: IREV_OSUN_PORTAL_URL,
+    verificationStatus: 'Awaiting verification',
+  };
+};
+const loadOsunIrevPilot = async (force = false) => {
+  if (!force && irevOsunCache?.expiresAt > Date.now()) return irevOsunCache.data;
+  const [stats, recent] = await Promise.all([
+    fetchIrevJson(`elections/${IREV_OSUN_ELECTION_ID}/result/stats`),
+    fetchIrevJson(`elections/${IREV_OSUN_ELECTION_ID}/pus/recent`),
+  ]);
+  const uploads = (Array.isArray(recent) ? recent : [])
+    .map(normalizeIrevUpload)
+    .filter(item => item.id && item.puCode && item.imageUrl)
+    .slice(0, 40);
+  const data = {
+    pilot: true,
+    state: 'Osun',
+    electionId: IREV_OSUN_ELECTION_ID,
+    electionName: sanitizeString(recent?.[0]?.election?.full_name || 'Osun governorship election'),
+    portalUrl: IREV_OSUN_PORTAL_URL,
+    submitted: Math.max(0, Number(stats?.documents) || 0),
+    expected: Math.max(0, Number(stats?.expected ?? stats?.pus) || 0),
+    latestUploadAt: stats?.latest?.document?.updated_at || stats?.latest?.updated_at || uploads[0]?.uploadedAt || '',
+    uploads,
+    fetchedAt: new Date().toISOString(),
+    notice: 'Official IReV upload metadata and images. AI extraction is an unverified draft until reviewed against the source image.',
+  };
+  irevOsunCache = { data, expiresAt: Date.now() + 30_000 };
+  return data;
+};
+app.get('/api/irev/osun', auth, rateLimit, asyncRoute(async (req, res) => {
+  try {
+    const data = await loadOsunIrevPilot(req.query.refresh === '1' && isAdminRole(req.user));
+    res.set('Cache-Control', 'private, no-store');
+    return res.json(data);
+  } catch (error) {
+    console.error('[irev] Osun pilot fetch failed:', error.message);
+    return res.status(503).json({ message: 'The official IReV feed is temporarily unavailable.' });
+  }
+}));
+app.post('/api/irev/osun/ocr', auth, adminOnly, rateLimit, asyncRoute(async (req, res) => {
+  const uploadId = sanitizeString(req.body?.uploadId || '');
+  const pilot = await loadOsunIrevPilot();
+  const upload = pilot.uploads.find(item => item.id === uploadId);
+  if (!upload) return res.status(404).json({ message: 'IReV upload not found in the recent official feed.' });
+  const prompt = `Transcribe this Nigerian INEC polling-unit result sheet carefully. This is an OCR assistance task, not a declaration of an election result. Return plain text with: polling-unit code, polling-unit name, each visible party abbreviation and score, rejected ballots, total valid votes, total votes cast, and any fields that are unclear. Use [unclear] instead of guessing. End with CONFIDENCE: low, medium, or high. The source metadata says PU ${upload.puCode}, ${upload.pollingUnit}, ${upload.ward}, ${upload.lga}.`;
+  let text = '';
+  let provider = '';
+  let model = '';
+  if (process.env.GEMINI_API_KEY) {
+    const imageResponse = await fetch(upload.imageUrl, { signal: AbortSignal.timeout(15_000), headers: { 'User-Agent': 'Election-Monitor/1.0 IReV verification' } });
+    if (!imageResponse.ok) return res.status(502).json({ message: 'The official result image could not be retrieved.' });
+    const mimeType = String(imageResponse.headers.get('content-type') || '').split(';')[0];
+    if (!['image/jpeg', 'image/png', 'image/webp'].includes(mimeType)) return res.status(415).json({ message: 'The IReV result image format is not supported.' });
+    const imageBytes = Buffer.from(await imageResponse.arrayBuffer());
+    if (imageBytes.length > 8 * 1024 * 1024) return res.status(413).json({ message: 'The IReV result image is too large to extract.' });
+    model = process.env.GEMINI_MODEL || 'gemini-3.1-flash-lite';
+    const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${encodeURIComponent(process.env.GEMINI_API_KEY)}`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, signal: AbortSignal.timeout(45_000),
+      body: JSON.stringify({ contents: [{ parts: [{ text: prompt }, { inline_data: { mime_type: mimeType, data: imageBytes.toString('base64') } }] }], generationConfig: { temperature: 0 } }),
+    });
+    const body = await response.json().catch(() => ({}));
+    if (!response.ok) return res.status(502).json({ message: body?.error?.message || 'Image extraction failed.' });
+    text = body.candidates?.[0]?.content?.parts?.map(part => part.text || '').join('') || '';
+    provider = 'gemini';
+  } else if (process.env.OPENAI_API_KEY) {
+    model = openAiPrimaryModel;
+    const response = await fetch('https://api.openai.com/v1/responses', {
+      method: 'POST', headers: { Authorization: `Bearer ${process.env.OPENAI_API_KEY}`, 'Content-Type': 'application/json' }, signal: AbortSignal.timeout(45_000),
+      body: JSON.stringify({ model, input: [{ role: 'user', content: [{ type: 'input_text', text: prompt }, { type: 'input_image', image_url: upload.imageUrl }] }], max_output_tokens: 900 }),
+    });
+    const body = await response.json().catch(() => ({}));
+    if (!response.ok) return res.status(502).json({ message: body?.error?.message || 'Image extraction failed.' });
+    text = body.output_text || body.output?.flatMap(item => item.content || []).map(item => item.text || '').join('') || '';
+    provider = 'openai';
+  } else {
+    return res.status(503).json({ message: 'Configure GEMINI_API_KEY or OPENAI_API_KEY to enable image-to-text extraction.' });
+  }
+  const draft = sanitizeString(text).slice(0, 6000);
+  if (!draft) return res.status(502).json({ message: 'No readable text was extracted from this image.' });
+  return res.json({ uploadId, draft, provider, model, verificationStatus: 'AI draft — human verification required', sourceUrl: upload.imageUrl, extractedAt: new Date().toISOString() });
+}));
 app.use(['/api/news/summary', '/api/analysis/ai'], (req, _res, next) => { console.log(`[ai] request=${req.path} geminiConfigured=${Boolean(process.env.GEMINI_API_KEY)} model=${process.env.GEMINI_MODEL || 'gemini-2.0-flash'}`); next(); });
 app.get('/api/ai/status', auth, adminOnly, rateLimit, (_, res) => {
   const provider = process.env.GROQ_API_KEY ? 'groq' : process.env.GEMINI_API_KEY ? 'gemini' : process.env.OPENAI_API_KEY ? 'openai' : 'none';

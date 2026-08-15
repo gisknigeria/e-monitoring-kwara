@@ -2187,7 +2187,7 @@ function AnalyticsPanel({
   );
 }
 
-function ResultsCenter({ incidents, parties = [], officers = [], mapLayers = [], selected, onClose, authToken, initialFocusParty = "", onPartyMapChange, onTool, onCsv, onClear }) {
+function ResultsCenter({ incidents, parties = [], officers = [], mapLayers = [], selected, onClose, authToken, canAdmin = false, initialFocusParty = "", onPartyMapChange, onTool, onCsv, onClear }) {
   const [view, setView] = useState("pulse");
   const [resultSourceFilter, setResultSourceFilter] = useState("");
   const [focusParty, setFocusParty] = useState(initialFocusParty);
@@ -2199,11 +2199,45 @@ function ResultsCenter({ incidents, parties = [], officers = [], mapLayers = [],
   const [newsSummary, setNewsSummary] = useState("");
   const [newsSummaryError, setNewsSummaryError] = useState("");
   const [newsSummaryLoading, setNewsSummaryLoading] = useState(false);
+  const [irevPilot, setIrevPilot] = useState(null);
+  const [irevLoading, setIrevLoading] = useState(false);
+  const [irevError, setIrevError] = useState("");
+  const [irevDrafts, setIrevDrafts] = useState({});
+  const [irevExtractingId, setIrevExtractingId] = useState("");
   useEffect(() => {
     if (view !== "news" || news.length) return;
     setNewsLoading(true);
     request("/news?q=Kwara State politics INEC elections parties security SBK PDP governorship 2027", authToken).then(data => setNews(data.articles || [])).catch(error => { setNews([]); setNewsError(error.message || "News service unavailable"); }).finally(() => setNewsLoading(false));
   }, [view, news.length]);
+  const loadIrevPilot = async (force = false) => {
+    setIrevLoading(true);
+    setIrevError("");
+    try {
+      setIrevPilot(await request(`/irev/osun${force ? "?refresh=1" : ""}`, authToken));
+    } catch (error) {
+      setIrevError(error.message || "The official IReV feed is unavailable.");
+    } finally {
+      setIrevLoading(false);
+    }
+  };
+  useEffect(() => {
+    if (view !== "breakdown") return undefined;
+    loadIrevPilot();
+    const timer = window.setInterval(() => loadIrevPilot(), 60_000);
+    return () => window.clearInterval(timer);
+  }, [view, authToken]);
+  const extractIrevText = async (uploadId) => {
+    setIrevExtractingId(uploadId);
+    setIrevError("");
+    try {
+      const result = await request("/irev/osun/ocr", authToken, { method: "POST", body: JSON.stringify({ uploadId }) });
+      setIrevDrafts((current) => ({ ...current, [uploadId]: result }));
+    } catch (error) {
+      setIrevError(error.message || "Image-to-text extraction failed.");
+    } finally {
+      setIrevExtractingId("");
+    }
+  };
   const reports = useMemo(
     () => incidents.filter((item) => item.reportType === POLLING_RESULT_TYPE),
     [incidents],
@@ -2226,13 +2260,15 @@ function ResultsCenter({ incidents, parties = [], officers = [], mapLayers = [],
   }, [reports, parties]);
   const sourceStats = useMemo(() => RESULT_SOURCES.map((source) => {
     const rows = summary.rows.filter((row) => row.resultSource === source);
+    const liveIrevUploads = source === "INEC IReV" ? Number(irevPilot?.submitted || 0) : 0;
     return {
       source,
-      submissions: rows.length,
+      submissions: Math.max(rows.length, liveIrevUploads),
       units: new Set(rows.map((row) => `${row.lga}|${row.ward}|${row.pollingUnit}`)).size,
       votes: rows.reduce((total, row) => total + row.results.reduce((sum, item) => sum + Number(item.votes || 0), 0), 0),
+      liveIrevUploads,
     };
-  }), [summary.rows]);
+  }), [summary.rows, irevPilot]);
   const displayedResultRows = useMemo(
     () => resultSourceFilter ? summary.rows.filter((row) => row.resultSource === resultSourceFilter) : summary.rows,
     [summary.rows, resultSourceFilter],
@@ -2400,7 +2436,28 @@ function ResultsCenter({ incidents, parties = [], officers = [], mapLayers = [],
         {["winloss", "winloss-lga"].includes(view) && <div className="result-table-card" style={{marginTop: 16}}><p className="muted">Select a party in the Action tab to compare its wins and losses. Results update automatically as new submissions arrive.</p></div>}
         {view !== "breakdown" ? null : <>
         <section className="result-source-grid" aria-label="Result submission sources">
-          {sourceStats.map((item) => <button type="button" className={`result-source-card ${resultSourceFilter === item.source ? "active" : ""}`} key={item.source} onClick={() => setResultSourceFilter((current) => current === item.source ? "" : item.source)}><span>{item.source}</span><strong>{item.submissions}</strong><small>{item.units} polling unit{item.units === 1 ? "" : "s"} · {item.votes.toLocaleString()} votes</small></button>)}
+          {sourceStats.map((item) => <button type="button" className={`result-source-card ${resultSourceFilter === item.source ? "active" : ""}`} key={item.source} onClick={() => setResultSourceFilter((current) => current === item.source ? "" : item.source)}><span>{item.source}</span><strong>{item.submissions}</strong><small>{item.liveIrevUploads ? `${item.liveIrevUploads.toLocaleString()} official sheets · vote totals awaiting verification` : `${item.units} polling unit${item.units === 1 ? "" : "s"} · ${item.votes.toLocaleString()} votes`}</small></button>)}
+        </section>
+        <section className="irev-pilot-card">
+          <header className="irev-pilot-head">
+            <div><span className="eyebrow">LIVE OFFICIAL SOURCE · PILOT</span><h2>INEC IReV — Osun</h2><p>Reads public polling-unit upload metadata and original result-sheet images from IReV every 60 seconds.</p></div>
+            <div className="irev-pilot-actions"><a href={irevPilot?.portalUrl || "https://irev.inecnigeria.org/"} target="_blank" rel="noreferrer">Open IReV</a><button type="button" disabled={irevLoading} onClick={() => loadIrevPilot(true)}><FaSyncAlt /> {irevLoading ? "Checking…" : "Refresh now"}</button></div>
+          </header>
+          {irevError && <div className="error">{irevError}</div>}
+          {irevPilot && <>
+            <div className="irev-pilot-stats"><div><span>Uploaded</span><strong>{irevPilot.submitted.toLocaleString()}</strong></div><div><span>Expected</span><strong>{irevPilot.expected.toLocaleString()}</strong></div><div><span>Coverage</span><strong>{irevPilot.expected ? `${((irevPilot.submitted / irevPilot.expected) * 100).toFixed(1)}%` : "—"}</strong></div><div><span>Last checked</span><strong>{new Date(irevPilot.fetchedAt).toLocaleTimeString()}</strong></div></div>
+            <p className="irev-verification-note"><MdWarning /> {irevPilot.notice}</p>
+            <div className="irev-upload-grid">
+              {irevPilot.uploads.slice(0, 12).map((upload) => <article className="irev-upload-card" key={upload.id}>
+                <a className="irev-upload-image" href={upload.imageUrl} target="_blank" rel="noreferrer"><img src={upload.imageUrl} alt={`INEC IReV result sheet for ${upload.puCode}`} loading="lazy" /></a>
+                <div className="irev-upload-copy"><span>{upload.lga} · {upload.ward}</span><h3>{upload.pollingUnit}</h3><b>{upload.puCode}</b><small>{upload.uploadedAt ? new Date(upload.uploadedAt).toLocaleString() : "Upload time unavailable"}</small><em>{upload.verificationStatus}</em>
+                  {canAdmin && <button type="button" disabled={irevExtractingId === upload.id} onClick={() => extractIrevText(upload.id)}><MdFlashOn /> {irevExtractingId === upload.id ? "Extracting…" : "Extract text draft"}</button>}
+                </div>
+                {irevDrafts[upload.id] && <div className="irev-ocr-draft"><strong>AI draft — verify against image</strong><pre>{irevDrafts[upload.id].draft}</pre><small>{irevDrafts[upload.id].provider} · {irevDrafts[upload.id].model}</small></div>}
+              </article>)}
+            </div>
+          </>}
+          {!irevPilot && irevLoading && <p className="muted">Connecting to the official IReV feed…</p>}
         </section>
         <section className="result-total-strip">
           <article className="result-total-card grand"><span>Polling-unit submissions</span><strong>{reports.length}</strong><small>Multiple updates per unit are allowed</small></article>{summary.partyNames.map(party => <article className="result-total-card" key={party}><span>{party}</span><strong>{summary.totals[party].toLocaleString()}</strong><small>Total uploaded votes</small></article>)}
@@ -5623,7 +5680,7 @@ function Dashboard({ session, onLogout, onSessionUpdate }) {
           />
         </Suspense>
       )}
-      {resultsOpen && <ResultsCenter incidents={incidents} parties={parties} officers={officers} mapLayers={mapLayers} selected={selected} onClose={() => setResultsOpen(false)} authToken={session.token} initialFocusParty={partyMapAnalysis?.party || ""} onPartyMapChange={setPartyMapAnalysis} onTool={runAnalyticTool} onCsv={importCsvPoints} onClear={clearMapTools} />}
+      {resultsOpen && <ResultsCenter incidents={incidents} parties={parties} officers={officers} mapLayers={mapLayers} selected={selected} onClose={() => setResultsOpen(false)} authToken={session.token} canAdmin={canAdmin} initialFocusParty={partyMapAnalysis?.party || ""} onPartyMapChange={setPartyMapAnalysis} onTool={runAnalyticTool} onCsv={importCsvPoints} onClear={clearMapTools} />}
       {pendingAreaAction && (
         <div className="modal-backdrop">
           <section className="modal area-action-modal">
