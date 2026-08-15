@@ -1125,8 +1125,17 @@ body.resizing-sidebar{cursor:col-resize;user-select:none}
 .sidebar-dropdown-body>button.officer-row{width:100%;border-width:0 0 1px;background:transparent;text-align:left}
 .sidebar-dropdown-body>button.officer-row:hover,.sidebar-dropdown-body>button.officer-row.focused{background:#14532d}
 .sidebar-dropdown-body>button.officer-row.focused{box-shadow:inset 3px 0 #4ade80}
-.officer-location-tooltip{background:#0d2315!important;border:1px solid #4ade80!important;border-radius:7px!important;color:#fff!important;box-shadow:0 8px 24px #0009!important;line-height:1.35!important;padding:7px 9px!important;text-align:center!important}
+.officer-location-tooltip{background:#0d2315!important;border:1px solid #4ade80!important;border-radius:8px!important;color:#fff!important;box-shadow:0 8px 24px #0009!important;line-height:1.35!important;padding:9px 11px!important;text-align:left!important;min-width:210px!important}
 .officer-location-tooltip:before{border-top-color:#4ade80!important}
+.officer-location-tooltip *{color:#fff!important}
+.officer-location-label{display:grid;gap:3px;color:#fff!important}
+.officer-location-label-head{display:flex;align-items:center;justify-content:space-between;gap:10px}
+.officer-location-label-head strong{color:#fff!important;font-size:13px!important}
+.officer-location-label-head button{display:grid;place-items:center;width:22px;height:22px;padding:0;border:1px solid #fca5a5;border-radius:50%;background:#7f1d1d!important;color:#fff!important;font-size:16px!important;line-height:1!important;cursor:pointer}
+.officer-location-label>span{color:#86efac!important;font-size:10px!important;text-transform:uppercase;letter-spacing:.06em}
+.officer-location-label>b{color:#fde68a!important;font-size:12px!important}
+.officer-location-label>small{color:#fff!important;font-family:"JetBrains Mono",Consolas,monospace!important;font-size:10px!important}
+.officer-location-label>em{color:#d1fae5!important;font-size:9px!important;font-style:normal}
 
 /* Camera live indicator pill (background mode) */
 .camera-live-pill{position:fixed;top:18px;right:18px;z-index:2300;display:flex;align-items:center;gap:8px;padding:10px 12px;border:1px solid #ef4444;border-radius:999px;background:#1a0208ee;color:#fff;box-shadow:0 10px 30px #00000080;backdrop-filter:blur(8px);animation:live-pill-pulse 2s ease-in-out infinite}

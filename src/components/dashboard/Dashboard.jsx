@@ -740,6 +740,7 @@ function MapView({
   onBoundarySelect,
   onBoundaryClear,
   focusedOfficerId,
+  onClearOfficerFocus,
 }) {
   const el = useRef(null);
   const leaflet = useRef(null);
@@ -955,6 +956,12 @@ function MapView({
     officers.forEach((item) => {
       const locationName = item.locationName || item.unit || "Last known location";
       const shortName = String(item.name || "User").trim().split(/\s+/).pop();
+      const isFocused = item.id === focusedOfficerId;
+      const coordinateLabel = `${Number(item.lat).toFixed(5)}, ${Number(item.lng).toFixed(5)}`;
+      const freshnessLabel = item.hasLiveLocation ? "Current live location" : "Last known location";
+      const updatedLabel = item.lastSeen
+        ? `Updated ${new Date(item.lastSeen).toLocaleString()}`
+        : "No live update time available";
       const icon = L.divIcon({
         className: "",
         html: `<div class="officer-marker ${item.status.toLowerCase()}"><span></span>${escapeMapText(shortName)}</div>`,
@@ -968,14 +975,26 @@ function MapView({
         `<div class="marker-popup"><b>${escapeMapText(item.name)}</b><br>${escapeMapText(locationName)}<br>Status: ${escapeMapText(item.status)}${item.lastSeen ? `<br>Last GPS: ${new Date(item.lastSeen).toLocaleTimeString()}` : ""}${item.speed != null ? `<br>Speed: ${Math.round(item.speed * 3.6)} km/h` : ""}<div class="marker-actions"><button data-tool="measure">Measure from here</button><button data-tool="route">Route from here</button></div></div>`,
       );
       marker.bindTooltip(
-        `<strong>${escapeMapText(item.name)}</strong><br>${escapeMapText(locationName)}`,
+        `<div class="officer-location-label"><div class="officer-location-label-head"><strong>${escapeMapText(item.name)}</strong>${isFocused ? '<button type="button" data-close-officer-label aria-label="Close user location label">×</button>' : ""}</div><span>${escapeMapText(freshnessLabel)}</span><b>${escapeMapText(locationName)}</b><small>${escapeMapText(coordinateLabel)}</small><em>${escapeMapText(updatedLabel)}</em></div>`,
         {
-          permanent: item.id === focusedOfficerId,
+          permanent: isFocused,
           direction: "top",
           offset: [0, -10],
           className: "officer-location-tooltip",
+          interactive: isFocused,
         },
       );
+      marker.on("tooltipopen", (event) => {
+        const closeButton = event.tooltip
+          .getElement()
+          ?.querySelector("[data-close-officer-label]");
+        if (closeButton) {
+          closeButton.onclick = (clickEvent) => {
+            L.DomEvent.stopPropagation(clickEvent);
+            onClearOfficerFocus?.("");
+          };
+        }
+      });
       marker.on("popupopen", (event) =>
         event.popup
           .getElement()
@@ -1036,7 +1055,7 @@ function MapView({
       );
       overlays.current.push(marker);
     });
-  }, [incidents, officers, cameras, emergencyAlerts, onMarkerTool, focusedOfficerId]);
+  }, [incidents, officers, cameras, emergencyAlerts, onMarkerTool, focusedOfficerId, onClearOfficerFocus]);
   useEffect(() => {
     if (!leaflet.current) return;
     areaLayers.current.forEach((x) => x.remove());
@@ -2443,6 +2462,7 @@ function Dashboard({ session, onLogout, onSessionUpdate }) {
             heading: live?.heading,
             lastSeen: live?.timestamp,
             unit: u.unit || `Field Unit ${String(index + 1).padStart(2, "0")}`,
+            hasLiveLocation,
             hasLastKnownLocation: hasLiveLocation || hasStoredLocation,
             locationName:
               u.pollingUnit ||
@@ -2454,6 +2474,10 @@ function Dashboard({ session, onLogout, onSessionUpdate }) {
     [users, gpsPositions],
   );
   const focusOfficerOnMap = (officer) => {
+    if (focusedOfficerId === officer?.id) {
+      setFocusedOfficerId("");
+      return;
+    }
     if (!officer?.hasLastKnownLocation) {
       setNotice(`No last seen location is available for ${officer?.name || "this user"}`);
       setTimeout(() => setNotice(""), 2500);
@@ -5148,6 +5172,7 @@ function Dashboard({ session, onLogout, onSessionUpdate }) {
           }}
           onBoundaryClear={clearBoundarySelection}
           focusedOfficerId={focusedOfficerId}
+          onClearOfficerFocus={setFocusedOfficerId}
         />}
         {!isAgent && <button
           className="my-location-target"
