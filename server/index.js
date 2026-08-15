@@ -908,7 +908,24 @@ app.post('/api/irev/osun/ocr', auth, adminOnly, rateLimit, asyncRoute(async (req
   let text = '';
   let provider = '';
   let model = '';
-  if (process.env.GEMINI_API_KEY) {
+  if (process.env.GROQ_API_KEY) {
+    model = process.env.GROQ_VISION_MODEL || 'qwen/qwen3.6-27b';
+    const response = await fetch('https://api.groq.com/openai/v1/chat/completions', {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${process.env.GROQ_API_KEY}`, 'Content-Type': 'application/json' },
+      signal: AbortSignal.timeout(45_000),
+      body: JSON.stringify({
+        model,
+        messages: [{ role: 'user', content: [{ type: 'text', text: prompt }, { type: 'image_url', image_url: { url: upload.imageUrl } }] }],
+        temperature: 0,
+        max_completion_tokens: 1200,
+      }),
+    });
+    const body = await response.json().catch(() => ({}));
+    if (!response.ok) return res.status(502).json({ message: body?.error?.message || 'Groq image extraction failed.' });
+    text = body.choices?.[0]?.message?.content || '';
+    provider = 'groq';
+  } else if (process.env.GEMINI_API_KEY) {
     const imageResponse = await fetch(upload.imageUrl, { signal: AbortSignal.timeout(15_000), headers: { 'User-Agent': 'Election-Monitor/1.0 IReV verification' } });
     if (!imageResponse.ok) return res.status(502).json({ message: 'The official result image could not be retrieved.' });
     const mimeType = String(imageResponse.headers.get('content-type') || '').split(';')[0];
@@ -935,7 +952,7 @@ app.post('/api/irev/osun/ocr', auth, adminOnly, rateLimit, asyncRoute(async (req
     text = body.output_text || body.output?.flatMap(item => item.content || []).map(item => item.text || '').join('') || '';
     provider = 'openai';
   } else {
-    return res.status(503).json({ message: 'Configure GEMINI_API_KEY or OPENAI_API_KEY to enable image-to-text extraction.' });
+    return res.status(503).json({ message: 'Configure GROQ_API_KEY, GEMINI_API_KEY, or OPENAI_API_KEY to enable image-to-text extraction.' });
   }
   const draft = sanitizeString(text).slice(0, 6000);
   if (!draft) return res.status(502).json({ message: 'No readable text was extracted from this image.' });
