@@ -21,19 +21,44 @@ function summarizeNewsLocally(articles = []) {
 
 function analyzeContextLocally(context = {}) {
   const incidents = Array.isArray(context.incidents) ? context.incidents : [];
-  const critical = incidents.filter((incident) => incident?.severity === 'Critical' || incident?.reportType === 'SOS-Emergency').length;
-  const open = incidents.filter((incident) => !['Resolved', 'Submitted'].includes(incident?.status)).length;
-  const coverage = Number(context.coverage || 0);
-  const leader = context.leader || 'the leading party';
+  const projection = context.projection || {};
+  const resultSummary = context.resultSummary || {};
+  const selectedParty = String(context.selectedParty || '').trim();
+  const party = context.partyAnalysis || null;
+  const criticalItems = incidents.filter((incident) => incident?.severity === 'Critical' || incident?.reportType === 'SOS-Emergency');
+  const openItems = incidents.filter((incident) => !['Resolved', 'Submitted'].includes(incident?.status));
+  const withoutEvidence = openItems.filter((incident) => !Number(incident?.mediaCount));
+  const coverage = Number(projection.coverage || resultSummary.submissions || 0);
+  const leader = projection.leader || 'No party';
+  const margin = Number(projection.margin || 0);
+  const locationCounts = criticalItems.reduce((counts, incident) => {
+    const location = [incident?.lga, incident?.ward].filter(Boolean).join(' / ') || 'unspecified locations';
+    counts[location] = (counts[location] || 0) + 1;
+    return counts;
+  }, {});
+  const topRiskLocation = Object.entries(locationCounts).sort((a, b) => b[1] - a[1])[0];
+  const assessment = selectedParty && party
+    ? `${selectedParty} has ${Number(party.votes || 0).toLocaleString()} submitted votes and leads in ${Number(party.wards || 0)} assessed wards and ${Number(party.lgas || 0)} assessed LGAs. This is an interim operational picture, not a final result.`
+    : `${leader} leads the submitted vote data by ${margin.toLocaleString()} votes across ${coverage} covered polling units. The picture remains provisional until missing units and evidence are verified.`;
+  const evidence = [
+    `- ${incidents.length} incidents are in scope: ${criticalItems.length} critical/SOS and ${Math.max(0, openItems.length - criticalItems.length)} other open items.`,
+    `- ${withoutEvidence.length} open incident${withoutEvidence.length === 1 ? '' : 's'} currently lack attached media evidence.`,
+    topRiskLocation ? `- The highest observed critical/SOS concentration is ${topRiskLocation[0]} with ${topRiskLocation[1]} item${topRiskLocation[1] === 1 ? '' : 's'}.` : '- No geographic concentration of critical/SOS incidents is established.',
+  ];
+  const risks = [
+    `- Result coverage is ${coverage} polling unit${coverage === 1 ? '' : 's'}; unreported units can materially change margins.`,
+    `- ${openItems.length} incident${openItems.length === 1 ? '' : 's'} remain unresolved or unsubmitted, limiting confidence in the operating picture.`,
+    '- Incident descriptions are field observations and require corroboration before escalation or public use.',
+  ];
+  const nextActions = [
+    criticalItems.length ? `- Dispatch the response coordinator immediately to verify and triage the ${criticalItems.length} critical/SOS item${criticalItems.length === 1 ? '' : 's'}, recording disposition and response time.` : '- Confirm with the response desk now that no unlogged critical or SOS events are awaiting triage.',
+    withoutEvidence.length ? `- Assign field supervisors within the next reporting cycle to obtain timestamped evidence for ${withoutEvidence.length} open item${withoutEvidence.length === 1 ? '' : 's'} and mark unverifiable reports accordingly.` : '- Audit the evidence desk this cycle to confirm every open report has usable, timestamped support.',
+    `- Reconcile the results desk now against polling-unit submissions, duplicates, and arithmetic before relying on the ${margin.toLocaleString()}-vote margin.`,
+    `- Contact ward reporting teams this cycle to close coverage gaps beyond the ${coverage} currently represented polling unit${coverage === 1 ? '' : 's'}.`,
+  ];
+  const confidence = coverage >= 50 && !criticalItems.length && withoutEvidence.length === 0 ? 'MODERATE: coverage and evidence are improving, but results remain provisional.' : 'LOW TO MODERATE: open incidents, evidence gaps, and incomplete polling-unit coverage limit certainty.';
 
-  const bullets = [];
-  if (critical) bullets.push(`${critical} critical or SOS incident${critical === 1 ? '' : 's'} needs immediate attention.`);
-  if (open > critical) bullets.push(`${open - critical} additional open incident${open - critical === 1 ? '' : 's'} should be reviewed.`);
-  if (coverage < 10) bullets.push(`Coverage is still low at ${coverage} submitted units; treat the projection with caution.`);
-  else bullets.push(`Coverage is reasonably healthy at ${coverage} submitted units.`);
-  bullets.push(`${leader} is the current lead in the available data, but confirmation is still needed from missing units.`);
-
-  return `Local analysis: ${bullets.join(' ')} Keep the operation focused on verification, incident triage, and evidence collection.`;
+  return `EXECUTIVE ASSESSMENT\n${assessment}\n\nEVIDENCE & PATTERNS\n${evidence.join('\n')}\n\nRISKS & UNCERTAINTIES\n${risks.join('\n')}\n\nACTIONABLE NEXT STEPS\n${nextActions.join('\n')}\n\nCONFIDENCE\n${confidence}`;
 }
 
 export { summarizeNewsLocally, analyzeContextLocally };

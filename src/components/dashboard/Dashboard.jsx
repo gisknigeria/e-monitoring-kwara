@@ -262,6 +262,7 @@ const INCIDENT_TYPES = [
   "Battery Depletion",
 ];
 const POLLING_RESULT_TYPE = "Polling Unit Result";
+const RESULT_SOURCES = ["Agent", "Supervisor", "INEC IReV"];
 const COMMAND_PARTY = "Party";
 const REPORT_TYPES = [...INCIDENT_TYPES, POLLING_RESULT_TYPE];
 
@@ -2188,6 +2189,7 @@ function AnalyticsPanel({
 
 function ResultsCenter({ incidents, parties = [], officers = [], mapLayers = [], selected, onClose, authToken, initialFocusParty = "", onPartyMapChange, onTool, onCsv, onClear }) {
   const [view, setView] = useState("pulse");
+  const [resultSourceFilter, setResultSourceFilter] = useState("");
   const [focusParty, setFocusParty] = useState(initialFocusParty);
   const [outlook, setOutlook] = useState("");
   const [outlookLoading, setOutlookLoading] = useState(false);
@@ -2210,7 +2212,9 @@ function ResultsCenter({ incidents, parties = [], officers = [], mapLayers = [],
     const rows = reports.map((report) => {
       let results = [];
       try { const parsed = JSON.parse(report.resultCount || "[]"); if (Array.isArray(parsed)) results = parsed; } catch { results = parseResultEntries(report.resultCount).map(item => ({ party: item.label, votes: item.value })); }
-      return { ...report, results };
+      const creatorRole = officers.find((officer) => officer.id === report.createdBy)?.role;
+      const resultSource = report.style?.resultSource || (creatorRole === "Supervisor" ? "Supervisor" : creatorRole === "Admin" || creatorRole === "Super Admin" ? "INEC IReV" : "Agent");
+      return { ...report, results, resultSource };
     });
     const historicalParties = rows.flatMap(row => row.results.map(item => item.party));
     const partyNames = [...new Set([...parties, ...historicalParties].filter(Boolean))];
@@ -2220,6 +2224,19 @@ function ResultsCenter({ incidents, parties = [], officers = [], mapLayers = [],
       rows: rows.sort((a, b) => `${a.lga}${a.ward}${a.pollingUnit}`.localeCompare(`${b.lga}${b.ward}${b.pollingUnit}`)),
     };
   }, [reports, parties]);
+  const sourceStats = useMemo(() => RESULT_SOURCES.map((source) => {
+    const rows = summary.rows.filter((row) => row.resultSource === source);
+    return {
+      source,
+      submissions: rows.length,
+      units: new Set(rows.map((row) => `${row.lga}|${row.ward}|${row.pollingUnit}`)).size,
+      votes: rows.reduce((total, row) => total + row.results.reduce((sum, item) => sum + Number(item.votes || 0), 0), 0),
+    };
+  }), [summary.rows]);
+  const displayedResultRows = useMemo(
+    () => resultSourceFilter ? summary.rows.filter((row) => row.resultSource === resultSourceFilter) : summary.rows,
+    [summary.rows, resultSourceFilter],
+  );
   const top6 = useMemo(() => summary.partyNames.slice().sort((a,b) => summary.totals[b]-summary.totals[a]).slice(0,6), [summary]);
   const winLoss = useMemo(() => {
     const groups = (key) => {
@@ -2284,6 +2301,67 @@ function ResultsCenter({ incidents, parties = [], officers = [], mapLayers = [],
     `Review: ${actionableIntel.otherOpen} other open incident${actionableIntel.otherOpen === 1 ? "" : "s"}.`,
   ], [actionableIntel]);
   const cleanSummaryText = (value) => String(value || "").replace(/\*\*/g, "").trim();
+  const aiBriefingSections = useMemo(() => {
+    const text = cleanSummaryText(outlook);
+    if (!text) return [];
+    const knownHeadings = ["EXECUTIVE ASSESSMENT", "EVIDENCE & PATTERNS", "RISKS & UNCERTAINTIES", "ACTIONABLE NEXT STEPS", "CONFIDENCE"];
+    const sections = [];
+    let current = null;
+    text.split(/\r?\n/).map(line => line.trim()).filter(Boolean).forEach(line => {
+      const normalized = line.replace(/:$/, "").toUpperCase();
+      if (knownHeadings.includes(normalized)) {
+        current = { title: normalized, lines: [] };
+        sections.push(current);
+        return;
+      }
+      if (!current) {
+        current = { title: "OPERATIONAL BRIEFING", lines: [] };
+        sections.push(current);
+      }
+      current.lines.push(line.replace(/^[-•]\s*/, ""));
+    });
+    return sections;
+  }, [outlook]);
+  const runOperationalAnalysis = async () => {
+    const safeIncidents = incidents.slice(0, 100).map(item => ({
+      id: item.id,
+      title: item.title,
+      description: String(item.description || "").slice(0, 500),
+      reportType: item.reportType,
+      severity: item.severity,
+      status: item.status,
+      lga: item.lga,
+      ward: item.ward,
+      pollingUnit: item.pollingUnit,
+      assignedTo: item.assignedTo,
+      mediaCount: Array.isArray(item.media) ? item.media.length : 0,
+      createdAt: item.createdAt,
+    }));
+    const severityCounts = incidents.reduce((counts, item) => ({ ...counts, [item.severity || "Unknown"]: (counts[item.severity || "Unknown"] || 0) + 1 }), {});
+    const statusCounts = incidents.reduce((counts, item) => ({ ...counts, [item.status || "Unknown"]: (counts[item.status || "Unknown"] || 0) + 1 }), {});
+    setOutlookLoading(true);
+    setOutlook("");
+    try {
+      const response = await request("/analysis/ai", authToken, {
+        method: "POST",
+        body: JSON.stringify({ context: {
+          generatedAt: new Date().toISOString(),
+          projection: forecast,
+          resultSummary: { submissions: reports.length, partyTotals: summary.totals, assessedWards: winLoss.wards.length, assessedLgas: winLoss.lgas.length },
+          selectedParty: focusParty || null,
+          partyAnalysis,
+          incidentSummary: { total: incidents.length, severityCounts, statusCounts, actionableIntel },
+          incidents: safeIncidents,
+          currentActions: actions,
+        } }),
+      });
+      setOutlook(response.analysis || "No operational analysis returned.");
+    } catch (error) {
+      setOutlook(error.message || "Operational analysis unavailable.");
+    } finally {
+      setOutlookLoading(false);
+    }
+  };
   return (
     <div className="results-center">
       <header className="results-center-head">
@@ -2303,37 +2381,40 @@ function ResultsCenter({ incidents, parties = [], officers = [], mapLayers = [],
         {view === "action" && <section className="result-table-card" style={{ marginBottom: 16 }}>
           <div className="result-table-title">
             <div><h2>Insight</h2><p>Realtime analysis of performance, insight &amp; operational intelligence</p></div>
-            <div className="analysis-actions"><button className="primary action-btn summary-action-btn" disabled={outlookLoading} onClick={() => { const safeIncidents = incidents.slice(0, 100).map(item => ({ id: item.id, title: item.title, description: String(item.description || "").slice(0, 500), reportType: item.reportType, severity: item.severity, status: item.status, lga: item.lga, ward: item.ward, pollingUnit: item.pollingUnit, createdAt: item.createdAt })); setOutlookLoading(true); request("/analysis/ai", authToken, { method: "POST", body: JSON.stringify({ context: { projection: forecast, selectedParty: focusParty, partyAnalysis, incidents: safeIncidents, actions } }) }).then(x => setOutlook(x.analysis || "No operational analysis returned.")).catch(e => setOutlook(e.message || "Operational analysis unavailable.")).finally(() => setOutlookLoading(false)); }}><MdFlashOn /> <span>{outlookLoading ? "Analyzing…" : "Operational Analysis"}</span></button></div>
+            <div className="analysis-actions"><button className="primary action-btn summary-action-btn" disabled={outlookLoading} onClick={runOperationalAnalysis}><MdFlashOn /> <span>{outlookLoading ? "Analyzing…" : "Operational Analysis"}</span></button></div>
           </div>
           <div className="actionable-intel">
             <h3>Actionable Intel</h3>
-            <div className="actionable-intel-grid">
-              <article className="actionable-intel-card prioritize"><span>Prioritize</span><p><strong>{actionableIntel.critical}</strong> critical/SOS item{actionableIntel.critical === 1 ? "" : "s"} for response verification.</p></article>
-              <article className="actionable-intel-card review"><span>Review</span><p><strong>{actionableIntel.otherOpen}</strong> other open incident{actionableIntel.otherOpen === 1 ? "" : "s"}</p></article>
+            <div className={`actionable-intel-grid ${focusParty ? "party-only" : ""}`}>
+              {!focusParty && <article className="actionable-intel-card prioritize"><span>Prioritize</span><p><strong>{actionableIntel.critical}</strong> critical/SOS item{actionableIntel.critical === 1 ? "" : "s"} for response verification.</p></article>}
+              {!focusParty && <article className="actionable-intel-card review"><span>Review</span><p><strong>{actionableIntel.otherOpen}</strong> other open incident{actionableIntel.otherOpen === 1 ? "" : "s"}</p></article>}
               <article className="actionable-intel-card party"><span>Party focus</span><label className="party-focus-field"><select value={focusParty} onChange={e => setFocusParty(e.target.value)} aria-label="Select party for operational analysis"><option value="">No parties</option>{summary.partyNames.map(p => <option key={p} value={p}>{p}</option>)}</select></label></article>
             </div>
           </div>
-          {partyAnalysis && <p className="party-focus-summary">{focusParty}: <b>{partyAnalysis.votes.toLocaleString()}</b> votes, leading in <b>{partyAnalysis.wards}</b> wards and <b>{partyAnalysis.lgas}</b> LGAs. Related incident mentions: <b>{partyAnalysis.incidents}</b>.</p>}
-          {outlook && <div className="news-summary">{cleanSummaryText(outlook)}</div>}
+          {partyAnalysis && <article className="party-result-card"><header><span>Focused result</span><strong>{focusParty}</strong></header><div><section><span>Total votes</span><b>{partyAnalysis.votes.toLocaleString()}</b></section><section><span>Wards leading</span><b>{partyAnalysis.wards}</b></section><section><span>LGAs leading</span><b>{partyAnalysis.lgas}</b></section><section><span>Related incidents</span><b>{partyAnalysis.incidents}</b></section></div></article>}
+          {aiBriefingSections.length > 0 && <section className="ai-intelligence-response"><header><div><span>AI Intelligence</span><h3>Operational assessment &amp; actions</h3></div></header><div className="ai-intelligence-grid">{aiBriefingSections.map(section => <article className={section.title === "ACTIONABLE NEXT STEPS" ? "ai-section actionable" : "ai-section"} key={section.title}><h4>{section.title}</h4>{section.lines.map((line, index) => <p key={`${section.title}-${index}`}>{section.title === "ACTIONABLE NEXT STEPS" && <span className="ai-action-number">{index + 1}</span>}{line}</p>)}</article>)}</div></section>}
         </section>}
         {partyAnalysis && view !== "breakdown" && view !== "news" && <section className="party-lga-analysis"><div className="party-lga-summary"><div><span>Selected party</span><strong>{focusParty}</strong></div><div className="winning"><span>LGAs winning</span><strong>{partyAnalysis.winningLgas.length}</strong></div><div className="losing"><span>LGAs losing</span><strong>{partyAnalysis.losingLgas.length}</strong></div><div><span>Total votes</span><strong>{partyAnalysis.votes.toLocaleString()}</strong></div></div><div className="party-lga-columns"><section className="party-lga-column winning"><header><div><span className="performance-dot" />Winning LGAs</div><b>{partyAnalysis.winningLgas.length}</b></header><div className="party-lga-list">{partyAnalysis.winningLgas.map(item => <article key={item.name}><div><strong>{item.name}</strong><small>Ahead of {item.opponent}</small></div><div><b>+{item.margin.toLocaleString()}</b><small>{item.votes.toLocaleString()} votes</small></div></article>)}{!partyAnalysis.winningLgas.length && <p>No confirmed LGA lead for {focusParty} yet.</p>}</div></section><section className="party-lga-column losing"><header><div><span className="performance-dot" />Losing LGAs</div><b>{partyAnalysis.losingLgas.length}</b></header><div className="party-lga-list">{partyAnalysis.losingLgas.map(item => <article key={item.name}><div><strong>{item.name}</strong><small>Behind {item.opponent}</small></div><div><b>-{item.margin.toLocaleString()}</b><small>{item.votes.toLocaleString()} votes</small></div></article>)}{!partyAnalysis.losingLgas.length && <p>No confirmed LGA loss for {focusParty} yet.</p>}</div></section></div>{partyAnalysis.tiedLgas.length > 0 && <p className="party-tied-note">Tied in: {partyAnalysis.tiedLgas.join(", ")}.</p>}<p className="party-analysis-note">Leading in {partyAnalysis.wards} wards. Related incident mentions: {partyAnalysis.incidents}. Based only on submitted polling-unit results.</p></section>}
         {view === "winloss" && <section className="result-table-card"><div className="result-table-title"><div><h2>Win / Loss Analysis</h2><p>Leading party by ward and LGA from submitted polling-unit results.</p></div><b>Top {top6.length} parties</b></div><div className="wl-sub-tabs"><button className="wl-sub-tab active">By Ward</button><button className="wl-sub-tab" onClick={() => setView("winloss-lga")}>By LGA</button></div><div className="result-table-scroll"><table className="result-progress-table"><thead><tr><th>Ward</th><th>Winner</th>{top6.map(p => <th key={p}>{p}</th>)}</tr></thead><tbody>{winLoss.wards.map(g => <tr key={g.label}><td>{g.label}</td><td><b>{g.winner || "—"}</b></td>{top6.map(p => <td key={p}>{g.votes[p].toLocaleString()} {g.winner === p ? "✓" : g.winner ? "✕" : ""}</td>)}</tr>)}{!winLoss.wards.length && <tr><td colSpan={top6.length + 2} className="result-empty">No ward-level data available yet.</td></tr>}</tbody></table></div></section>}
         {view === "winloss-lga" && <section className="result-table-card"><div className="result-table-title"><div><h2>LGA Win / Loss Analysis</h2><p>Leading party in each Local Government Area.</p></div></div><div className="wl-sub-tabs"><button className="wl-sub-tab" onClick={() => setView("winloss")}>By Ward</button><button className="wl-sub-tab active">By LGA</button></div><div className="result-table-scroll"><table className="result-progress-table"><thead><tr><th>LGA</th><th>Winner</th>{top6.map(p => <th key={p}>{p}</th>)}</tr></thead><tbody>{winLoss.lgas.map(g => <tr key={g.label}><td><b>{g.label}</b></td><td><b>{g.winner || "—"}</b></td>{top6.map(p => <td key={p}>{g.votes[p].toLocaleString()} {g.winner === p ? "✓" : g.winner ? "✕" : ""}</td>)}</tr>)}</tbody></table></div></section>}
         {["winloss", "winloss-lga"].includes(view) && <div className="result-table-card" style={{marginTop: 16}}><p className="muted">Select a party in the Action tab to compare its wins and losses. Results update automatically as new submissions arrive.</p></div>}
         {view !== "breakdown" ? null : <>
+        <section className="result-source-grid" aria-label="Result submission sources">
+          {sourceStats.map((item) => <button type="button" className={`result-source-card ${resultSourceFilter === item.source ? "active" : ""}`} key={item.source} onClick={() => setResultSourceFilter((current) => current === item.source ? "" : item.source)}><span>{item.source}</span><strong>{item.submissions}</strong><small>{item.units} polling unit{item.units === 1 ? "" : "s"} · {item.votes.toLocaleString()} votes</small></button>)}
+        </section>
         <section className="result-total-strip">
           <article className="result-total-card grand"><span>Polling-unit submissions</span><strong>{reports.length}</strong><small>Multiple updates per unit are allowed</small></article>{summary.partyNames.map(party => <article className="result-total-card" key={party}><span>{party}</span><strong>{summary.totals[party].toLocaleString()}</strong><small>Total uploaded votes</small></article>)}
         </section>
         <section className="result-table-card">
-          <div className="result-table-title"><div><h2>Polling-unit breakdown</h2><p>Counts and evidence submitted from the field.</p></div><b>{reports.length} submitted</b></div>
+          <div className="result-table-title"><div><h2>Polling-unit breakdown</h2><p>{resultSourceFilter ? `${resultSourceFilter} submissions only. Select the active source card again to show all.` : "Agent, Supervisor, and INEC IReV counts with field evidence."}</p></div><b>{displayedResultRows.length} shown</b></div>
           <div className="result-table-scroll">
             <table className="result-progress-table">
-              <thead><tr><th>LGA</th><th>Ward</th><th>Polling unit</th>{summary.partyNames.map(party => <th key={party}>{party}</th>)}<th>Location</th><th>Evidence</th><th>Uploaded</th></tr></thead>
+              <thead><tr><th>Source</th><th>LGA</th><th>Ward</th><th>Polling unit</th>{summary.partyNames.map(party => <th key={party}>{party}</th>)}<th>Location</th><th>Evidence</th><th>Uploaded</th></tr></thead>
               <tbody>
-                {summary.rows.map((row) => (
-                  <tr key={row.id}><td>{row.lga || "—"}</td><td>{row.ward || "—"}</td><td><b>{row.pollingUnit || "—"}</b></td>{summary.partyNames.map(party => <td key={party}><strong>{Number(row.results.find(item => item.party === party)?.votes || 0).toLocaleString()}</strong></td>)}<td>{Number(row.lat).toFixed(5)}, {Number(row.lng).toFixed(5)}</td><td><div className="result-evidence">{(row.media || []).filter((item) => item.type === "image").slice(0, 2).map((item, index) => <a href={item.data} target="_blank" rel="noreferrer" key={`${row.id}-${index}`}><img src={item.data} alt={`Evidence for ${row.pollingUnit}`} /></a>)}</div></td><td>{new Date(row.createdAt).toLocaleString()}</td></tr>
+                {displayedResultRows.map((row) => (
+                  <tr key={row.id}><td><span className={`result-source-badge source-${row.resultSource.toLowerCase().replace(/[^a-z]+/g, "-")}`}>{row.resultSource}</span></td><td>{row.lga || "—"}</td><td>{row.ward || "—"}</td><td><b>{row.pollingUnit || "—"}</b></td>{summary.partyNames.map(party => <td key={party}><strong>{Number(row.results.find(item => item.party === party)?.votes || 0).toLocaleString()}</strong></td>)}<td>{Number(row.lat).toFixed(5)}, {Number(row.lng).toFixed(5)}</td><td><div className="result-evidence">{(row.media || []).filter((item) => item.type === "image").slice(0, 2).map((item, index) => <a href={item.data} target="_blank" rel="noreferrer" key={`${row.id}-${index}`}><img src={item.data} alt={`Evidence for ${row.pollingUnit}`} /></a>)}</div></td><td>{new Date(row.createdAt).toLocaleString()}</td></tr>
                 ))}
-                {!summary.rows.length && <tr><td className="result-empty" colSpan={summary.partyNames.length + 7}>No polling-unit results have been uploaded yet.</td></tr>}
+                {!displayedResultRows.length && <tr><td className="result-empty" colSpan={summary.partyNames.length + 8}>No {resultSourceFilter || "polling-unit"} results have been uploaded yet.</td></tr>}
               </tbody>
             </table>
           </div>
@@ -2823,6 +2904,8 @@ function Dashboard({ session, onLogout, onSessionUpdate }) {
       if (session.user.role !== "Super Admin" && x.role === "Super Admin") {
         return;
       }
+      if (session.user.role === "Supervisor" && !(x.role === "Agent" && String(x.lga || "").trim().toLowerCase() === String(session.user.lga || "").trim().toLowerCase() && String(x.ward || "").trim().toLowerCase() === String(session.user.ward || "").trim().toLowerCase())) return;
+      if (session.user.role === "Agent") return;
       setUsers((old) => (old.some((u) => u.id === x.id) ? old : [...old, x]));
       setReportUsers((old) =>
         x.id === session.user.id || old.some((u) => u.id === x.id)

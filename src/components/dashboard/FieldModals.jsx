@@ -205,10 +205,49 @@ const ReportTypeIcon = ({ type, size = 14, color = "currentColor" }) => {
 };
 
 export function PollingResultForm({ user, point, parties, onClose, onSave }) {
+  const isAgent = user.role === "Agent";
+  const isSupervisor = user.role === "Supervisor";
+  const canChooseZone = ["Admin", "Super Admin"].includes(user.role);
+  const initialState = normalizeRegistrationState(user.state || DEFAULT_REGISTRATION_STATE);
+  const initialStateOptions = getRegistrationLocationOptions(initialState);
+  const initialLga = user.lga || initialStateOptions.lgas[0] || "";
+  const initialWard = user.ward || getRegistrationLocationOptions(initialState, initialLga).wards[0] || "";
+  const initialUnits = getRegistrationLocationOptions(initialState, initialLga, initialWard).pollingUnits;
+  const [assignment, setAssignment] = useState({
+    state: initialState,
+    lga: initialLga,
+    ward: initialWard,
+    pollingUnit: isAgent ? (user.pollingUnit || "") : (initialUnits.includes(user.pollingUnit) ? user.pollingUnit : initialUnits[0] || ""),
+  });
   const [rows, setRows] = useState([{ party: parties[0] || "", votes: "" }]);
   const [photo, setPhoto] = useState(null);
   const [error, setError] = useState("");
   const submittedAt = useMemo(() => new Date(), []);
+  const stateOptions = useMemo(
+    () => NIGERIA_STATES.map((code) => ({ code, label: STATE_CODE_TO_NAME[code] || code })),
+    [],
+  );
+  const locationOptions = useMemo(
+    () => getRegistrationLocationOptions(assignment.state, assignment.lga, assignment.ward),
+    [assignment.state, assignment.lga, assignment.ward],
+  );
+
+  const changeState = (stateValue) => {
+    const state = normalizeRegistrationState(stateValue);
+    const lga = getRegistrationLocationOptions(state).lgas[0] || "";
+    const ward = getRegistrationLocationOptions(state, lga).wards[0] || "";
+    const pollingUnit = getRegistrationLocationOptions(state, lga, ward).pollingUnits[0] || "";
+    setAssignment({ state, lga, ward, pollingUnit });
+  };
+  const changeLga = (lga) => {
+    const ward = getRegistrationLocationOptions(assignment.state, lga).wards[0] || "";
+    const pollingUnit = getRegistrationLocationOptions(assignment.state, lga, ward).pollingUnits[0] || "";
+    setAssignment((current) => ({ ...current, lga, ward, pollingUnit }));
+  };
+  const changeWard = (ward) => {
+    const pollingUnit = getRegistrationLocationOptions(assignment.state, assignment.lga, ward).pollingUnits[0] || "";
+    setAssignment((current) => ({ ...current, ward, pollingUnit }));
+  };
 
   useEffect(() => {
     setRows((current) =>
@@ -245,10 +284,12 @@ export function PollingResultForm({ user, point, parties, onClose, onSave }) {
             .map((row) => ({ party: row.party, votes: Number(row.votes) }));
           if (!results.length) return setError("Add at least one party and vote number.");
           if (!photo) return setError("A photograph of the signed result is required.");
+          if (!assignment.pollingUnit) return setError("Select the polling unit being reported.");
           onSave({
-            pollingUnit: user.pollingUnit,
-            lga: user.lga,
-            ward: user.ward,
+            state: assignment.state,
+            pollingUnit: assignment.pollingUnit,
+            lga: assignment.lga,
+            ward: assignment.ward,
             lat: point.lat,
             lng: point.lng,
             results,
@@ -263,8 +304,15 @@ export function PollingResultForm({ user, point, parties, onClose, onSave }) {
           </div>
           <button type="button" className="icon-btn" onClick={onClose}><FaTimes /></button>
         </div>
+        <div className="result-assignment-grid">
+          {canChooseZone && <label>State<select value={assignment.state} onChange={(event) => changeState(event.target.value)}>{stateOptions.map((state) => <option key={state.code} value={state.code}>{state.label}</option>)}</select></label>}
+          {canChooseZone && <label>LGA<select value={assignment.lga} onChange={(event) => changeLga(event.target.value)}>{getRegistrationLocationOptions(assignment.state).lgas.map((lga) => <option key={lga}>{lga}</option>)}</select></label>}
+          {canChooseZone && <label>Ward<select value={assignment.ward} onChange={(event) => changeWard(event.target.value)}>{getRegistrationLocationOptions(assignment.state, assignment.lga).wards.map((ward) => <option key={ward}>{ward}</option>)}</select></label>}
+          {!isAgent && <label>{isSupervisor ? "Polling unit in your ward" : "INEC IReV polling unit"}<select required value={assignment.pollingUnit} onChange={(event) => setAssignment((current) => ({ ...current, pollingUnit: event.target.value }))}><option value="">Select polling unit</option>{locationOptions.pollingUnits.map((unit) => <option key={unit}>{unit}</option>)}</select></label>}
+        </div>
         <div className="result-capture-meta">
-          <div><span>Registered polling unit</span><b>{user.pollingUnit || "Not assigned"}</b></div>
+          <div><span>{isAgent ? "Registered polling unit" : "Selected polling unit"}</span><b>{assignment.pollingUnit || "Not selected"}</b></div>
+          <div><span>Result source</span><b>{isAgent ? "Agent" : isSupervisor ? "Supervisor" : "INEC IReV"}</b></div>
           <div><span>Current location</span><b>{Number(point.lat).toFixed(6)}, {Number(point.lng).toFixed(6)}</b></div>
           <div><span>Sending time</span><b>{submittedAt.toLocaleString()}</b></div>
         </div>
