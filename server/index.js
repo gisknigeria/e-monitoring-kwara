@@ -9,6 +9,9 @@ import { randomBytes } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 import pg from 'pg';
+import { createWorker } from 'tesseract.js';
+import tesseractEnglish from '@tesseract.js-data/eng';
+import sharp from 'sharp';
 import { canManageRank, getRegistrationLocationOptions, normalizeCommand, normalizeRegistrationState, ranksBelow } from '../shared/electionData.js';
 import { credentialFingerprint, createId, createRateLimitState, normalizeText, sanitizeString, validateContentLength, validateCoordinates, validateEmail, validateExternalUrl, validateMediaPayload, validatePassword } from './security.js';
 import { analyzeContextLocally, summarizeNewsLocally } from './ai.js';
@@ -849,7 +852,7 @@ const ensureIrevArchiveLoaded = () => {
       irevOsunCache = { data: { ...archive, offline: true }, expiresAt: 0 };
     }
     for (const [id, extraction] of Object.entries(extractions || {})) {
-      if (id && Array.isArray(extraction?.results)) irevOcrCache.set(id, extraction);
+      if (id && extraction?.provider === 'local-ocr' && Array.isArray(extraction?.results)) irevOcrCache.set(id, extraction);
     }
   });
   return irevArchiveLoadPromise;
@@ -919,7 +922,7 @@ const loadOsunIrevPilot = async (force = false) => {
       fetchedAt: new Date().toISOString(),
       archivedAt: new Date().toISOString(),
       offline: false,
-      notice: 'Official IReV upload metadata and images. Saved on this server for offline access.',
+      notice: '',
     };
     const previous = irevOsunCache?.data;
     const changed = !previous || previous.uploads?.length !== data.uploads.length || previous.latestUploadAt !== data.latestUploadAt || previous.submitted !== data.submitted;
@@ -938,21 +941,70 @@ app.get('/api/irev/osun', auth, rateLimit, asyncRoute(async (req, res) => {
   try {
     const data = await loadOsunIrevPilot(req.query.refresh === '1' && isAdminRole(req.user));
     res.set('Cache-Control', 'private, no-store');
-    return res.json({ ...data, uploads: data.uploads.map(upload => ({ ...upload, extraction: irevOcrCache.get(upload.id) || null })) });
+    return res.json({ ...data, notice: data.offline ? 'Live IReV is unavailable. Showing the last results saved on this server.' : '', uploads: data.uploads.map(upload => ({ ...upload, extraction: irevOcrCache.get(upload.id) || null })) });
   } catch (error) {
     console.error('[irev] Osun pilot fetch failed:', error.message);
     return res.status(503).json({ message: 'The official IReV feed is temporarily unavailable.' });
   }
 }));
-const sendIrevAiFailure = (res, response, body, provider) => {
-  const providerMessage = sanitizeString(body?.error?.message || body?.message || `${provider} image extraction failed.`).slice(0, 500);
-  const providerCode = String(body?.error?.code || body?.error?.status || body?.code || '').toLowerCase();
-  const combined = `${providerMessage} ${providerCode}`.toLowerCase();
-  const quotaFinished = response.status === 402 || /insufficient[_ -]?quota|quota (?:has been )?exceeded|credit|billing|balance|payment required|resource_exhausted/.test(combined);
-  const rateLimited = response.status === 429 || /rate[_ -]?limit|too many requests/.test(combined);
-  if (quotaFinished) return res.status(429).json({ code: 'AI_QUOTA_EXHAUSTED', message: `${provider} AI token quota or credit has finished. Automatic result extraction has stopped.` });
-  if (rateLimited) return res.status(429).json({ code: 'AI_RATE_LIMITED', message: `${provider} AI is rate-limited. Automatic result extraction has stopped to prevent repeated requests.` });
-  return res.status(502).json({ code: 'AI_EXTRACTION_FAILED', message: providerMessage });
+const DEFAULT_INEC_PARTIES = ['AAC', 'ADC', 'ADP', 'APC', 'APGA', 'APM', 'APP', 'BP', 'LP', 'NNPP', 'NRM', 'PDP', 'PRP', 'SDP', 'YPP', 'ZLP', 'AA', 'ACCORD'];
+const IREV_OCR_WORKER_COUNT = Math.max(1, Math.min(Number(process.env.IREV_OCR_WORKERS) || 3, 4));
+const irevTesseractWorkerPromises = Array(IREV_OCR_WORKER_COUNT).fill(null);
+const irevOcrQueues = Array.from({ length: IREV_OCR_WORKER_COUNT }, () => Promise.resolve());
+let irevNextWorker = 0;
+let irevOcrPersistQueue = Promise.resolve();
+const getIrevTesseractWorker = async index => {
+  if (!irevTesseractWorkerPromises[index]) {
+    irevTesseractWorkerPromises[index] = createWorker('eng', undefined, { langPath: tesseractEnglish.langPath, gzip: tesseractEnglish.gzip }).then(async worker => {
+      await worker.setParameters({ preserve_interword_spaces: '1' });
+      return worker;
+    }).catch(error => { irevTesseractWorkerPromises[index] = null; throw error; });
+  }
+  return irevTesseractWorkerPromises[index];
+};
+const optimizeIrevImage = imageBytes => sharp(imageBytes)
+  .rotate()
+  .trim({ background: '#ffffff', threshold: 8 })
+  .resize({ width: 1600, withoutEnlargement: true, fit: 'inside' })
+  .grayscale()
+  .normalize()
+  .sharpen()
+  .png({ compressionLevel: 6 })
+  .toBuffer();
+const recognizeIrevImage = async imageBytes => {
+  const optimizedImage = await optimizeIrevImage(imageBytes);
+  const workerIndex = irevNextWorker++ % IREV_OCR_WORKER_COUNT;
+  const task = irevOcrQueues[workerIndex].then(async () => {
+    const worker = await getIrevTesseractWorker(workerIndex);
+    const { data } = await worker.recognize(optimizedImage);
+    return String(data?.text || '');
+  });
+  irevOcrQueues[workerIndex] = task.catch(() => {});
+  return task;
+};
+const extractPartyVotesFromOcr = (text, configuredParties = []) => {
+  const parties = [...new Set([...DEFAULT_INEC_PARTIES, ...configuredParties]
+    .map(party => sanitizeString(party).trim().toUpperCase())
+    .filter(party => /^[A-Z0-9&-]{2,12}$/.test(party)))]
+    .sort((a, b) => b.length - a.length);
+  const lines = String(text || '').toUpperCase().split(/\r?\n/).map(line => line.replace(/[|]/g, ' ').replace(/\s+/g, ' ').trim()).filter(Boolean);
+  const results = [];
+  for (const party of parties) {
+    const escapedParty = party.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    for (let index = 0; index < lines.length; index += 1) {
+      const match = lines[index].match(new RegExp(`(?:^|[^A-Z0-9])${escapedParty}(?:[^A-Z0-9]|$)`));
+      if (!match) continue;
+      const partyEnd = (match.index || 0) + match[0].length;
+      const sameLine = lines[index].slice(partyEnd).match(/\b\d{1,4}\b/g) || [];
+      const nextLine = !sameLine.length ? (lines[index + 1]?.match(/^\D{0,12}(\d{1,4})\b/) || [])[1] : null;
+      const rawVotes = sameLine.at(-1) ?? nextLine;
+      if (rawVotes == null) continue;
+      const votes = Number(rawVotes);
+      if (Number.isInteger(votes) && votes >= 0 && votes <= 5000) results.push({ party, votes });
+      break;
+    }
+  }
+  return results;
 };
 app.post('/api/irev/osun/ocr', auth, adminOnly, rateLimit, asyncRoute(async (req, res) => {
   const uploadId = sanitizeString(req.body?.uploadId || '');
@@ -960,73 +1012,26 @@ app.post('/api/irev/osun/ocr', auth, adminOnly, rateLimit, asyncRoute(async (req
   const upload = pilot.uploads.find(item => item.id === uploadId);
   if (!upload) return res.status(404).json({ message: 'IReV upload not found in the recent official feed.' });
   if (irevOcrCache.has(uploadId)) return res.json(irevOcrCache.get(uploadId));
-  const prompt = `Read only the political-party vote table on this Nigerian INEC polling-unit result sheet. Return ONLY a JSON array in this exact shape: [{"party":"APC","votes":123}]. Include every clearly readable party abbreviation and its vote count. Do not include headings, polling-unit details, totals, explanations, markdown, confidence, analysis, or reasoning. Do not guess unclear values. The source metadata is PU ${upload.puCode}, ${upload.pollingUnit}, ${upload.ward}, ${upload.lga}.`;
+  const imageResponse = await fetch(upload.imageUrl, { signal: AbortSignal.timeout(20_000), headers: { 'User-Agent': 'Election-Monitor/1.0 IReV OCR archive' } });
+  if (!imageResponse.ok) return res.status(502).json({ code: 'OCR_IMAGE_UNAVAILABLE', message: 'The official result image could not be retrieved.' });
+  const mimeType = String(imageResponse.headers.get('content-type') || '').split(';')[0];
+  if (!['image/jpeg', 'image/png', 'image/webp'].includes(mimeType)) return res.status(415).json({ code: 'OCR_IMAGE_FORMAT', message: 'The IReV result image format is not supported.' });
+  const imageBytes = Buffer.from(await imageResponse.arrayBuffer());
+  if (imageBytes.length > 8 * 1024 * 1024) return res.status(413).json({ code: 'OCR_IMAGE_TOO_LARGE', message: 'The IReV result image is too large to extract.' });
   let text = '';
-  let provider = '';
-  let model = '';
-  if (process.env.GROQ_API_KEY) {
-    model = process.env.GROQ_VISION_MODEL || 'qwen/qwen3.6-27b';
-    const response = await fetch('https://api.groq.com/openai/v1/chat/completions', {
-      method: 'POST',
-      headers: { Authorization: `Bearer ${process.env.GROQ_API_KEY}`, 'Content-Type': 'application/json' },
-      signal: AbortSignal.timeout(45_000),
-      body: JSON.stringify({
-        model,
-        messages: [{ role: 'user', content: [{ type: 'text', text: prompt }, { type: 'image_url', image_url: { url: upload.imageUrl } }] }],
-        temperature: 0,
-        max_completion_tokens: 700,
-      }),
-    });
-    const body = await response.json().catch(() => ({}));
-    if (!response.ok) return sendIrevAiFailure(res, response, body, 'Groq');
-    text = body.choices?.[0]?.message?.content || '';
-    provider = 'groq';
-  } else if (process.env.GEMINI_API_KEY) {
-    const imageResponse = await fetch(upload.imageUrl, { signal: AbortSignal.timeout(15_000), headers: { 'User-Agent': 'Election-Monitor/1.0 IReV verification' } });
-    if (!imageResponse.ok) return res.status(502).json({ message: 'The official result image could not be retrieved.' });
-    const mimeType = String(imageResponse.headers.get('content-type') || '').split(';')[0];
-    if (!['image/jpeg', 'image/png', 'image/webp'].includes(mimeType)) return res.status(415).json({ message: 'The IReV result image format is not supported.' });
-    const imageBytes = Buffer.from(await imageResponse.arrayBuffer());
-    if (imageBytes.length > 8 * 1024 * 1024) return res.status(413).json({ message: 'The IReV result image is too large to extract.' });
-    model = process.env.GEMINI_MODEL || 'gemini-3.1-flash-lite';
-    const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${encodeURIComponent(process.env.GEMINI_API_KEY)}`, {
-      method: 'POST', headers: { 'Content-Type': 'application/json' }, signal: AbortSignal.timeout(45_000),
-      body: JSON.stringify({ contents: [{ parts: [{ text: prompt }, { inline_data: { mime_type: mimeType, data: imageBytes.toString('base64') } }] }], generationConfig: { temperature: 0 } }),
-    });
-    const body = await response.json().catch(() => ({}));
-    if (!response.ok) return sendIrevAiFailure(res, response, body, 'Gemini');
-    text = body.candidates?.[0]?.content?.parts?.map(part => part.text || '').join('') || '';
-    provider = 'gemini';
-  } else if (process.env.OPENAI_API_KEY) {
-    model = openAiPrimaryModel;
-    const response = await fetch('https://api.openai.com/v1/responses', {
-      method: 'POST', headers: { Authorization: `Bearer ${process.env.OPENAI_API_KEY}`, 'Content-Type': 'application/json' }, signal: AbortSignal.timeout(45_000),
-      body: JSON.stringify({ model, input: [{ role: 'user', content: [{ type: 'input_text', text: prompt }, { type: 'input_image', image_url: upload.imageUrl }] }], max_output_tokens: 900 }),
-    });
-    const body = await response.json().catch(() => ({}));
-    if (!response.ok) return sendIrevAiFailure(res, response, body, 'OpenAI');
-    text = body.output_text || body.output?.flatMap(item => item.content || []).map(item => item.text || '').join('') || '';
-    provider = 'openai';
-  } else {
-    return res.status(503).json({ message: 'Configure GROQ_API_KEY, GEMINI_API_KEY, or OPENAI_API_KEY to enable image-to-text extraction.' });
+  try {
+    text = await recognizeIrevImage(imageBytes);
+  } catch (error) {
+    console.error('[irev] Local OCR failed:', error.message);
+    return res.status(503).json({ code: 'OCR_ENGINE_UNAVAILABLE', message: 'Local OCR is unavailable. Automatic extraction has stopped.' });
   }
-  const visibleText = String(text || '').replace(/<think>[\s\S]*?<\/think>/gi, '').replace(/```(?:json)?|```/gi, '').trim();
-  const arrayMatch = visibleText.match(/\[[\s\S]*\]/);
-  let parsed = [];
-  if (arrayMatch) {
-    try { parsed = JSON.parse(arrayMatch[0]); } catch { parsed = []; }
-  }
-  const results = (Array.isArray(parsed) ? parsed : [])
-    .map(item => ({
-      party: sanitizeString(item?.party || '').replace(/[^A-Za-z0-9 .&-]/g, '').trim().toUpperCase().slice(0, 40),
-      votes: Number(item?.votes),
-    }))
-    .filter(item => item.party && Number.isInteger(item.votes) && item.votes >= 0 && item.votes <= 100000)
-    .reduce((unique, item) => unique.some(existing => existing.party === item.party) ? unique : [...unique, item], []);
+  const results = extractPartyVotesFromOcr(text, await store.parties());
   if (!results.length) return res.status(502).json({ message: 'No readable party vote counts were extracted from this image.' });
-  const extraction = { uploadId, results, provider, model, sourceUrl: upload.imageUrl, extractedAt: new Date().toISOString() };
+  const extraction = { uploadId, results, provider: 'local-ocr', model: 'tesseract-eng', sourceUrl: upload.imageUrl, extractedAt: new Date().toISOString() };
   irevOcrCache.set(uploadId, extraction);
-  await store.setSetting(IREV_OSUN_OCR_KEY, Object.fromEntries(irevOcrCache));
+  const persistenceTask = irevOcrPersistQueue.then(() => store.setSetting(IREV_OSUN_OCR_KEY, Object.fromEntries(irevOcrCache)));
+  irevOcrPersistQueue = persistenceTask.catch(error => console.error('[irev] Could not persist OCR result:', error.message));
+  await persistenceTask;
   return res.json(extraction);
 }));
 app.use(['/api/news/summary', '/api/analysis/ai'], (req, _res, next) => { console.log(`[ai] request=${req.path} geminiConfigured=${Boolean(process.env.GEMINI_API_KEY)} model=${process.env.GEMINI_MODEL || 'gemini-2.0-flash'}`); next(); });

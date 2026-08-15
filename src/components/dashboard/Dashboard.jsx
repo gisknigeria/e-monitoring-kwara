@@ -2208,11 +2208,11 @@ function ResultsCenter({ incidents, parties = [], officers = [], mapLayers = [],
   const [irevLoading, setIrevLoading] = useState(false);
   const [irevError, setIrevError] = useState("");
   const [irevDrafts, setIrevDrafts] = useState({});
-  const [irevExtractingId, setIrevExtractingId] = useState("");
+  const [irevExtractingIds, setIrevExtractingIds] = useState(() => new Set());
   const [irevFailedIds, setIrevFailedIds] = useState(() => new Set());
   const [irevAutoStopped, setIrevAutoStopped] = useState(false);
   const [irevAiStoppedReason, setIrevAiStoppedReason] = useState("");
-  const [irevSection, setIrevSection] = useState("uploads");
+  const [irevSection, setIrevSection] = useState("results");
   const [irevSearch, setIrevSearch] = useState("");
   const [irevPreview, setIrevPreview] = useState(null);
   const [compareWithIrev, setCompareWithIrev] = useState(false);
@@ -2248,14 +2248,14 @@ function ResultsCenter({ incidents, parties = [], officers = [], mapLayers = [],
     return () => window.clearInterval(timer);
   }, [view, authToken]);
   const extractIrevText = async (uploadId) => {
-    setIrevExtractingId(uploadId);
+    setIrevExtractingIds((current) => new Set(current).add(uploadId));
     setIrevError("");
     try {
       const result = await request("/irev/osun/ocr", authToken, { method: "POST", body: JSON.stringify({ uploadId }) });
       setIrevDrafts((current) => ({ ...current, [uploadId]: result }));
     } catch (error) {
       setIrevFailedIds((current) => new Set(current).add(uploadId));
-      if (["AI_QUOTA_EXHAUSTED", "AI_RATE_LIMITED"].includes(error.code)) {
+      if (["AI_QUOTA_EXHAUSTED", "AI_RATE_LIMITED", "OCR_ENGINE_UNAVAILABLE"].includes(error.code)) {
         setIrevError("");
         setIrevAutoStopped(true);
         setIrevAiStoppedReason(error.message);
@@ -2267,20 +2267,21 @@ function ResultsCenter({ incidents, parties = [], officers = [], mapLayers = [],
         setIrevError(error.message || "Image-to-text extraction failed.");
       }
     } finally {
-      setIrevExtractingId("");
+      setIrevExtractingIds((current) => { const next = new Set(current); next.delete(uploadId); return next; });
     }
   };
   const openIrevPreview = (upload) => {
     setIrevPreview(upload);
-    if (canAdmin && !irevDrafts[upload.id] && irevExtractingId !== upload.id) extractIrevText(upload.id);
+    if (canAdmin && !irevDrafts[upload.id] && !irevExtractingIds.has(upload.id)) extractIrevText(upload.id);
   };
   useEffect(() => {
-    if ((view !== "irev" && !compareWithIrev) || !canAdmin || irevAutoStopped || !irevPilot?.uploads?.length || irevExtractingId) return undefined;
-    const nextUpload = irevPilot.uploads.find((upload) => !irevDrafts[upload.id] && !irevFailedIds.has(upload.id));
-    if (!nextUpload) return undefined;
-    const timer = window.setTimeout(() => extractIrevText(nextUpload.id), 700);
+    if ((view !== "irev" && !compareWithIrev) || !canAdmin || irevAutoStopped || !irevPilot?.uploads?.length) return undefined;
+    const availableSlots = Math.max(0, 3 - irevExtractingIds.size);
+    const nextUploads = irevPilot.uploads.filter((upload) => !irevDrafts[upload.id] && !irevFailedIds.has(upload.id) && !irevExtractingIds.has(upload.id)).slice(0, availableSlots);
+    if (!nextUploads.length) return undefined;
+    const timer = window.setTimeout(() => nextUploads.forEach((upload) => extractIrevText(upload.id)), 250);
     return () => window.clearTimeout(timer);
-  }, [view, compareWithIrev, canAdmin, irevAutoStopped, irevPilot, irevDrafts, irevExtractingId, irevFailedIds]);
+  }, [view, compareWithIrev, canAdmin, irevAutoStopped, irevPilot, irevDrafts, irevExtractingIds, irevFailedIds]);
   const reports = useMemo(
     () => incidents.filter((item) => item.reportType === POLLING_RESULT_TYPE),
     [incidents],
@@ -2534,7 +2535,7 @@ function ResultsCenter({ incidents, parties = [], officers = [], mapLayers = [],
           {sourceStats.filter((item) => item.source !== "INEC IReV").map((item) => <button type="button" className={`result-source-card ${resultSourceFilter === item.source ? "active" : ""}`} key={item.source} onClick={() => setResultSourceFilter((current) => current === item.source ? "" : item.source)}><span>{item.source}</span><strong>{item.submissions}</strong><small>{item.units} polling unit{item.units === 1 ? "" : "s"} · {item.votes.toLocaleString()} votes</small></button>)}
           <article className="result-source-card field-total"><span>Field submissions</span><strong>{fieldResultRows.length}</strong><small>Agent and Supervisor updates</small></article>
         </section>
-        {irevAiStoppedReason && <div className="irev-ai-stopped"><MdWarning /><div><strong>AI extraction stopped</strong><span>{irevAiStoppedReason}</span></div></div>}
+        {irevAiStoppedReason && <div className="irev-ai-stopped"><MdWarning /><div><strong>OCR extraction stopped</strong><span>{irevAiStoppedReason}</span></div></div>}
         </>}
         {view === "irev" && <section className="irev-pilot-card">
           <header className="irev-pilot-head">
@@ -2542,11 +2543,12 @@ function ResultsCenter({ incidents, parties = [], officers = [], mapLayers = [],
             <div className="irev-pilot-actions"><a href={irevPilot?.portalUrl || "https://irev.inecnigeria.org/"} target="_blank" rel="noreferrer">Open IReV</a><button type="button" disabled={irevLoading} onClick={() => loadIrevPilot(true)}><FaSyncAlt /> {irevLoading ? "Checking…" : "Refresh now"}</button></div>
           </header>
           {irevError && <div className="error">{irevError}</div>}
-          {irevAiStoppedReason && <div className="irev-ai-stopped"><MdWarning /><div><strong>AI extraction stopped</strong><span>{irevAiStoppedReason}</span></div></div>}
+          {irevAiStoppedReason && <div className="irev-ai-stopped"><MdWarning /><div><strong>OCR extraction stopped</strong><span>{irevAiStoppedReason}</span></div></div>}
           {irevPilot && <>
+            <section className="result-total-strip irev-result-totals">{irevTopParties.map((party) => <article className="result-total-card" key={party}><span>{party}</span><strong>{irevOnlyTotals[party].toLocaleString()}</strong></article>)}</section>
             <div className="irev-pilot-stats"><div><span>Uploaded</span><strong>{irevPilot.submitted.toLocaleString()}</strong></div><div><span>Expected</span><strong>{irevPilot.expected.toLocaleString()}</strong></div><div><span>Coverage</span><strong>{irevPilot.expected ? `${((irevPilot.submitted / irevPilot.expected) * 100).toFixed(1)}%` : "—"}</strong></div><div><span>Last checked</span><strong>{new Date(irevPilot.fetchedAt).toLocaleTimeString()}</strong></div></div>
-            <p className="irev-verification-note"><MdWarning /> {irevPilot.notice}</p>
-            <div className="wl-sub-tabs irev-sub-tabs"><button className={irevSection === "uploads" ? "wl-sub-tab active" : "wl-sub-tab"} onClick={() => setIrevSection("uploads")}>Polling-unit uploads</button><button className={irevSection === "results" ? "wl-sub-tab active" : "wl-sub-tab"} onClick={() => setIrevSection("results")}>Results</button>{irevExtractingId && <span>Reading result sheets automatically… {irevResultRows.length.toLocaleString()} ready</span>}</div>
+            {irevPilot.notice && <p className="irev-verification-note"><MdWarning /> {irevPilot.notice}</p>}
+            <div className="wl-sub-tabs irev-sub-tabs"><button className={irevSection === "results" ? "wl-sub-tab active" : "wl-sub-tab"} onClick={() => setIrevSection("results")}>Results</button><button className={irevSection === "uploads" ? "wl-sub-tab active" : "wl-sub-tab"} onClick={() => setIrevSection("uploads")}>Polling-unit uploads</button>{irevExtractingIds.size > 0 && <span>Reading {irevExtractingIds.size} sheets in parallel… {irevResultRows.length.toLocaleString()} ready</span>}</div>
             {irevSection === "uploads" && <>
             <div className="irev-table-toolbar"><div><strong>All uploaded polling units</strong><span>{filteredIrevUploads.length.toLocaleString()} of {irevPilot.uploads.length.toLocaleString()} sheets shown</span></div><label><FaSearch /><input value={irevSearch} onChange={(event) => setIrevSearch(event.target.value)} placeholder="Search LGA, ward, polling unit or PU code" />{irevSearch && <button type="button" onClick={() => setIrevSearch("")} aria-label="Clear IReV search"><FaTimes /></button>}</label></div>
             <div className="irev-table-scroll">
@@ -2557,10 +2559,9 @@ function ResultsCenter({ incidents, parties = [], officers = [], mapLayers = [],
             </div>
             </>}
             {irevSection === "results" && <>
-              <section className="result-total-strip irev-result-totals">{irevTopParties.map((party) => <article className="result-total-card" key={party}><span>{party}</span><strong>{irevOnlyTotals[party].toLocaleString()}</strong></article>)}</section>
               <div className="irev-table-scroll"><table className="result-progress-table irev-results-table"><thead><tr><th>LGA</th><th>Ward</th><th>Polling unit</th>{irevTopParties.map((party) => <th key={party}>{party}</th>)}</tr></thead><tbody>{irevResultRows.map((upload) => <tr key={upload.id}><td><b>{upload.lga || "—"}</b></td><td>{upload.ward || "—"}</td><td>{upload.pollingUnit || upload.puCode}</td>{irevTopParties.map((party) => <td key={party}><strong>{Number(upload.results.find((result) => result.party === party)?.votes || 0).toLocaleString()}</strong></td>)}</tr>)}{!irevResultRows.length && <tr><td className="result-empty" colSpan={irevTopParties.length + 3}>Result sheets are being read automatically.</td></tr>}</tbody></table></div>
             </>}
-            {irevPreview && <div className="irev-preview-backdrop" onClick={() => setIrevPreview(null)}><section className="irev-preview-modal" onClick={(event) => event.stopPropagation()}><header><div><span className="eyebrow">INEC IREV RESULT SHEET</span><h2>{irevPreview.puCode}</h2><p>{irevPreview.lga} · {irevPreview.ward} · {irevPreview.pollingUnit}</p></div><button type="button" className="icon-btn" onClick={() => setIrevPreview(null)} aria-label="Close image preview"><FaTimes /></button></header><div className="irev-preview-body"><div className="irev-preview-image"><img src={irevPreview.imageUrl} alt={`INEC IReV result sheet for ${irevPreview.puCode}`} /></div><aside><div className="irev-preview-actions"><a href={irevPreview.imageUrl} download target="_blank" rel="noreferrer">Download image</a></div><h3>Party results</h3>{irevExtractingId === irevPreview.id && <p className="muted">Reading party votes…</p>}{irevDrafts[irevPreview.id] ? <div className="irev-ocr-draft"><div className="irev-party-results">{(irevDrafts[irevPreview.id].results || []).map(({ party, votes }) => <div key={party}><strong>{party}</strong><b>{Number(votes).toLocaleString()}</b></div>)}</div></div> : !canAdmin ? <p className="muted">Automatic extraction is available to administrators.</p> : !irevExtractingId && <p className="muted">Party results are unavailable. Check the AI configuration and try reopening this image.</p>}</aside></div></section></div>}
+            {irevPreview && <div className="irev-preview-backdrop" onClick={() => setIrevPreview(null)}><section className="irev-preview-modal" onClick={(event) => event.stopPropagation()}><header><div><span className="eyebrow">INEC IREV RESULT SHEET</span><h2>{irevPreview.puCode}</h2><p>{irevPreview.lga} · {irevPreview.ward} · {irevPreview.pollingUnit}</p></div><button type="button" className="icon-btn" onClick={() => setIrevPreview(null)} aria-label="Close image preview"><FaTimes /></button></header><div className="irev-preview-body"><div className="irev-preview-image"><img src={irevPreview.imageUrl} alt={`INEC IReV result sheet for ${irevPreview.puCode}`} /></div><aside><div className="irev-preview-actions"><a href={irevPreview.imageUrl} download target="_blank" rel="noreferrer">Download image</a></div><h3>Party results</h3>{irevExtractingIds.has(irevPreview.id) && <p className="muted">Reading party votes…</p>}{irevDrafts[irevPreview.id] ? <div className="irev-ocr-draft"><div className="irev-party-results">{(irevDrafts[irevPreview.id].results || []).map(({ party, votes }) => <div key={party}><strong>{party}</strong><b>{Number(votes).toLocaleString()}</b></div>)}</div></div> : !canAdmin ? <p className="muted">Automatic extraction is available to administrators.</p> : !irevExtractingIds.has(irevPreview.id) && <p className="muted">This result sheet is queued for local OCR.</p>}</aside></div></section></div>}
           </>}
           {!irevPilot && irevLoading && <p className="muted">Connecting to the official IReV feed…</p>}
         </section>}

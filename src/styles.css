@@ -1451,7 +1451,7 @@ body.resizing-sidebar{cursor:col-resize;user-select:none}
 .irev-preview-body aside { overflow: visible; }
 .irev-sub-tabs { align-items: center; margin: 0 20px 14px; }
 .irev-sub-tabs > span { margin-left: auto; color: #93c5fd !important; font-size: 10px !important; }
-.irev-result-totals { padding: 0 20px 16px; }
+.irev-result-totals { padding: 16px 20px 0; }
 .irev-results-table { width: 100%; min-width: 0 !important; table-layout: fixed; }
 .irev-results-table th, .irev-results-table td { white-space: normal !important; overflow-wrap: anywhere; }
 .result-compare-actions { display: flex; align-items: center; justify-content: flex-end; gap: 12px; flex-wrap: wrap; }
