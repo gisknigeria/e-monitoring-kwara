@@ -833,15 +833,18 @@ const isTrustedIrevImage = value => {
     return false;
   }
 };
-const fetchIrevJson = async path => {
+const fetchIrevJson = async (path, maxBytes = 8 * 1024 * 1024) => {
   const response = await fetch(`${IREV_API_ORIGIN}/api/v1/${path}`, {
     headers: { Accept: 'application/json', 'User-Agent': 'Election-Monitor/1.0 IReV public-feed pilot' },
     signal: AbortSignal.timeout(15_000),
   });
   if (!response.ok) throw new Error(`IReV returned ${response.status}`);
   const contentLength = Number(response.headers.get('content-length') || 0);
-  if (contentLength > 8 * 1024 * 1024) throw new Error('IReV response is too large');
-  const payload = await response.json();
+  if (contentLength > maxBytes) throw new Error('IReV response is too large');
+  const bytes = Buffer.from(await response.arrayBuffer());
+  if (bytes.length > maxBytes) throw new Error('IReV response is too large');
+  let payload;
+  try { payload = JSON.parse(bytes.toString('utf8')); } catch { throw new Error('IReV returned malformed JSON'); }
   if (!payload?.success) throw new Error('IReV returned an invalid response');
   return payload.data;
 };
@@ -862,19 +865,19 @@ const normalizeIrevUpload = item => {
 };
 const loadOsunIrevPilot = async (force = false) => {
   if (!force && irevOsunCache?.expiresAt > Date.now()) return irevOsunCache.data;
-  const [stats, recent] = await Promise.all([
+  const [stats, allUnits] = await Promise.all([
     fetchIrevJson(`elections/${IREV_OSUN_ELECTION_ID}/result/stats`),
-    fetchIrevJson(`elections/${IREV_OSUN_ELECTION_ID}/pus/recent`),
+    fetchIrevJson(`elections/${IREV_OSUN_ELECTION_ID}/pus`, 16 * 1024 * 1024),
   ]);
-  const uploads = (Array.isArray(recent) ? recent : [])
+  const uploads = (Array.isArray(allUnits) ? allUnits : [])
     .map(normalizeIrevUpload)
     .filter(item => item.id && item.puCode && item.imageUrl)
-    .slice(0, 40);
+    .sort((a, b) => `${a.lga}|${a.ward}|${a.puCode}`.localeCompare(`${b.lga}|${b.ward}|${b.puCode}`));
   const data = {
     pilot: true,
     state: 'Osun',
     electionId: IREV_OSUN_ELECTION_ID,
-    electionName: sanitizeString(recent?.[0]?.election?.full_name || 'Osun governorship election'),
+    electionName: sanitizeString(allUnits?.[0]?.election?.full_name || 'Osun governorship election'),
     portalUrl: IREV_OSUN_PORTAL_URL,
     submitted: Math.max(0, Number(stats?.documents) || 0),
     expected: Math.max(0, Number(stats?.expected ?? stats?.pus) || 0),
@@ -883,7 +886,7 @@ const loadOsunIrevPilot = async (force = false) => {
     fetchedAt: new Date().toISOString(),
     notice: 'Official IReV upload metadata and images. AI extraction is an unverified draft until reviewed against the source image.',
   };
-  irevOsunCache = { data, expiresAt: Date.now() + 30_000 };
+  irevOsunCache = { data, expiresAt: Date.now() + 55_000 };
   return data;
 };
 app.get('/api/irev/osun', auth, rateLimit, asyncRoute(async (req, res) => {

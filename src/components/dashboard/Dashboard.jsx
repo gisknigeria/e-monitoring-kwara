@@ -1,6 +1,6 @@
 ﻿import { useEffect, useMemo, useRef, useState } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
-import { lazy, Suspense } from "react";
+import { Fragment, lazy, Suspense } from "react";
 import L from "leaflet";
 import { io } from "socket.io-client";
 import {
@@ -2204,6 +2204,7 @@ function ResultsCenter({ incidents, parties = [], officers = [], mapLayers = [],
   const [irevError, setIrevError] = useState("");
   const [irevDrafts, setIrevDrafts] = useState({});
   const [irevExtractingId, setIrevExtractingId] = useState("");
+  const [irevSearch, setIrevSearch] = useState("");
   useEffect(() => {
     if (view !== "news" || news.length) return;
     setNewsLoading(true);
@@ -2273,6 +2274,12 @@ function ResultsCenter({ incidents, parties = [], officers = [], mapLayers = [],
     () => resultSourceFilter ? summary.rows.filter((row) => row.resultSource === resultSourceFilter) : summary.rows,
     [summary.rows, resultSourceFilter],
   );
+  const filteredIrevUploads = useMemo(() => {
+    const query = irevSearch.trim().toLowerCase();
+    const uploads = irevPilot?.uploads || [];
+    if (!query) return uploads;
+    return uploads.filter((upload) => [upload.puCode, upload.pollingUnit, upload.ward, upload.lga].some((value) => String(value || "").toLowerCase().includes(query)));
+  }, [irevPilot, irevSearch]);
   const top6 = useMemo(() => summary.partyNames.slice().sort((a,b) => summary.totals[b]-summary.totals[a]).slice(0,6), [summary]);
   const winLoss = useMemo(() => {
     const groups = (key) => {
@@ -2447,14 +2454,15 @@ function ResultsCenter({ incidents, parties = [], officers = [], mapLayers = [],
           {irevPilot && <>
             <div className="irev-pilot-stats"><div><span>Uploaded</span><strong>{irevPilot.submitted.toLocaleString()}</strong></div><div><span>Expected</span><strong>{irevPilot.expected.toLocaleString()}</strong></div><div><span>Coverage</span><strong>{irevPilot.expected ? `${((irevPilot.submitted / irevPilot.expected) * 100).toFixed(1)}%` : "—"}</strong></div><div><span>Last checked</span><strong>{new Date(irevPilot.fetchedAt).toLocaleTimeString()}</strong></div></div>
             <p className="irev-verification-note"><MdWarning /> {irevPilot.notice}</p>
-            <div className="irev-upload-grid">
-              {irevPilot.uploads.slice(0, 12).map((upload) => <article className="irev-upload-card" key={upload.id}>
-                <a className="irev-upload-image" href={upload.imageUrl} target="_blank" rel="noreferrer"><img src={upload.imageUrl} alt={`INEC IReV result sheet for ${upload.puCode}`} loading="lazy" /></a>
-                <div className="irev-upload-copy"><span>{upload.lga} · {upload.ward}</span><h3>{upload.pollingUnit}</h3><b>{upload.puCode}</b><small>{upload.uploadedAt ? new Date(upload.uploadedAt).toLocaleString() : "Upload time unavailable"}</small><em>{upload.verificationStatus}</em>
-                  {canAdmin && <button type="button" disabled={irevExtractingId === upload.id} onClick={() => extractIrevText(upload.id)}><MdFlashOn /> {irevExtractingId === upload.id ? "Extracting…" : "Extract text draft"}</button>}
-                </div>
-                {irevDrafts[upload.id] && <div className="irev-ocr-draft"><strong>AI draft — verify against image</strong><pre>{irevDrafts[upload.id].draft}</pre><small>{irevDrafts[upload.id].provider} · {irevDrafts[upload.id].model}</small></div>}
-              </article>)}
+            <div className="irev-table-toolbar"><div><strong>All uploaded polling units</strong><span>{filteredIrevUploads.length.toLocaleString()} of {irevPilot.uploads.length.toLocaleString()} sheets shown</span></div><label><FaSearch /><input value={irevSearch} onChange={(event) => setIrevSearch(event.target.value)} placeholder="Search LGA, ward, polling unit or PU code" />{irevSearch && <button type="button" onClick={() => setIrevSearch("")} aria-label="Clear IReV search"><FaTimes /></button>}</label></div>
+            <div className="irev-table-scroll">
+              <table className="result-progress-table irev-full-table">
+                <thead><tr><th>#</th><th>LGA</th><th>Ward</th><th>Polling unit</th><th>PU code</th><th>Uploaded</th><th>Status</th><th>Result sheet</th>{canAdmin && <th>Text</th>}</tr></thead>
+                <tbody>{filteredIrevUploads.map((upload, index) => <Fragment key={upload.id}>
+                  <tr><td>{index + 1}</td><td><b>{upload.lga || "—"}</b></td><td>{upload.ward || "—"}</td><td>{upload.pollingUnit || "—"}</td><td><strong>{upload.puCode}</strong></td><td>{upload.uploadedAt ? new Date(upload.uploadedAt).toLocaleString() : "—"}</td><td><span className="irev-awaiting-badge">{upload.verificationStatus}</span></td><td><a className="irev-sheet-link" href={upload.imageUrl} target="_blank" rel="noreferrer">View image</a></td>{canAdmin && <td><button className="irev-extract-btn" type="button" disabled={irevExtractingId === upload.id} onClick={() => extractIrevText(upload.id)}><MdFlashOn /> {irevExtractingId === upload.id ? "Extracting…" : irevDrafts[upload.id] ? "Extracted" : "Extract text"}</button></td>}</tr>
+                  {irevDrafts[upload.id] && <tr className="irev-draft-row"><td colSpan={canAdmin ? 9 : 8}><div className="irev-ocr-draft"><strong>AI draft for {upload.puCode} — verify against the original image</strong><pre>{irevDrafts[upload.id].draft}</pre><small>{irevDrafts[upload.id].provider} · {irevDrafts[upload.id].model}</small></div></td></tr>}
+                </Fragment>)}</tbody>
+              </table>
             </div>
           </>}
           {!irevPilot && irevLoading && <p className="muted">Connecting to the official IReV feed…</p>}
