@@ -2228,7 +2228,7 @@ function ResultsCenter({ incidents, parties = [], officers = [], mapLayers = [],
   const [irevAutoStopped, setIrevAutoStopped] = useState(false);
   const [irevAiStoppedReason, setIrevAiStoppedReason] = useState("");
   const irevResumeTimerRef = useRef(null);
-  const [irevSection, setIrevSection] = useState("results");
+  const [irevSection, setIrevSection] = useState("uploads");
   const [irevSearch, setIrevSearch] = useState("");
   const [irevPreview, setIrevPreview] = useState(null);
   const [compareWithIrev, setCompareWithIrev] = useState(false);
@@ -2246,8 +2246,8 @@ function ResultsCenter({ incidents, parties = [], officers = [], mapLayers = [],
       const pilot = await request(`/irev/osun${force ? "?refresh=1" : ""}`, authToken);
       setIrevPilot(pilot);
       setIrevDrafts((current) => ({
-        ...Object.fromEntries((pilot.uploads || []).filter((upload) => upload.extraction).map((upload) => [upload.id, upload.extraction])),
-        ...current,
+        ...Object.fromEntries((pilot.uploads || []).filter((upload) => ["gemini", "groq"].includes(upload.extraction?.provider)).map((upload) => [upload.id, upload.extraction])),
+        ...Object.fromEntries(Object.entries(current).filter(([, extraction]) => ["gemini", "groq"].includes(extraction?.provider))),
       }));
       return pilot;
     } catch (error) {
@@ -2301,10 +2301,10 @@ function ResultsCenter({ incidents, parties = [], officers = [], mapLayers = [],
   };
   useEffect(() => {
     if ((view !== "irev" && !compareWithIrev) || !canAdmin || irevAutoStopped || !irevPilot?.uploads?.length) return undefined;
-    const availableSlots = Math.max(0, 3 - irevExtractingIds.size);
+    const availableSlots = Math.max(0, 2 - irevExtractingIds.size);
     const nextUploads = irevPilot.uploads.filter((upload) => !irevDrafts[upload.id] && !irevFailedIds.has(upload.id) && !irevExtractingIds.has(upload.id)).slice(0, availableSlots);
     if (!nextUploads.length) return undefined;
-    const timer = window.setTimeout(() => nextUploads.forEach((upload) => extractIrevText(upload.id)), 250);
+    const timer = window.setTimeout(() => nextUploads.forEach((upload) => extractIrevText(upload.id)), 5_000);
     return () => window.clearTimeout(timer);
   }, [view, compareWithIrev, canAdmin, irevAutoStopped, irevPilot, irevDrafts, irevExtractingIds, irevFailedIds]);
   const reports = useMemo(
@@ -2573,7 +2573,7 @@ function ResultsCenter({ incidents, parties = [], officers = [], mapLayers = [],
             <section className="result-total-strip irev-result-totals">{irevTopParties.map((party) => <article className="result-total-card" key={party}><span>{party}</span><strong>{irevOnlyTotals[party].toLocaleString()}</strong></article>)}</section>
             <div className="irev-pilot-stats"><div><span>Uploaded</span><strong>{irevPilot.submitted.toLocaleString()}</strong></div><div><span>Expected</span><strong>{irevPilot.expected.toLocaleString()}</strong></div><div><span>Coverage</span><strong>{irevPilot.expected ? `${((irevPilot.submitted / irevPilot.expected) * 100).toFixed(1)}%` : "—"}</strong></div><div><span>Last checked</span><strong>{new Date(irevPilot.fetchedAt).toLocaleTimeString()}</strong></div></div>
             {irevPilot.notice && <p className="irev-verification-note"><MdWarning /> {irevPilot.notice}</p>}
-            <div className="wl-sub-tabs irev-sub-tabs"><button className={irevSection === "results" ? "wl-sub-tab active" : "wl-sub-tab"} onClick={() => setIrevSection("results")}>Results</button><button className={irevSection === "uploads" ? "wl-sub-tab active" : "wl-sub-tab"} onClick={() => setIrevSection("uploads")}>Polling-unit uploads</button>{irevExtractingIds.size > 0 && <span>Reading {irevExtractingIds.size} sheets in parallel… {irevResultRows.length.toLocaleString()} ready</span>}</div>
+            <div className="wl-sub-tabs irev-sub-tabs"><button className={irevSection === "uploads" ? "wl-sub-tab active" : "wl-sub-tab"} onClick={() => setIrevSection("uploads")}>Polling-unit uploads</button><button className={irevSection === "results" ? "wl-sub-tab active" : "wl-sub-tab"} onClick={() => setIrevSection("results")}>Results</button>{irevExtractingIds.size > 0 && <span>Reading {irevExtractingIds.size} sheets in parallel… {irevResultRows.length.toLocaleString()} ready</span>}</div>
             {irevSection === "uploads" && <>
             <div className="irev-table-toolbar"><div><strong>All uploaded polling units</strong><span>{filteredIrevUploads.length.toLocaleString()} of {irevPilot.uploads.length.toLocaleString()} sheets shown</span></div><label><FaSearch /><input value={irevSearch} onChange={(event) => setIrevSearch(event.target.value)} placeholder="Search LGA, ward, polling unit or PU code" />{irevSearch && <button type="button" onClick={() => setIrevSearch("")} aria-label="Clear IReV search"><FaTimes /></button>}</label></div>
             <div className="irev-table-scroll">
@@ -2586,7 +2586,7 @@ function ResultsCenter({ incidents, parties = [], officers = [], mapLayers = [],
             {irevSection === "results" && <>
               <div className="irev-table-scroll"><table className="result-progress-table irev-results-table"><thead><tr><th>LGA</th><th>Ward</th><th>Polling unit</th>{irevTopParties.map((party) => <th key={party}>{party}</th>)}</tr></thead><tbody>{irevResultRows.map((upload) => <tr key={upload.id}><td><b>{upload.lga || "—"}</b></td><td>{upload.ward || "—"}</td><td>{upload.pollingUnit || upload.puCode}</td>{irevTopParties.map((party) => <td key={party}><strong>{Number(upload.results.find((result) => result.party === party)?.votes || 0).toLocaleString()}</strong></td>)}</tr>)}{!irevResultRows.length && <tr><td className="result-empty" colSpan={irevTopParties.length + 3}>Result sheets are being read automatically.</td></tr>}</tbody></table></div>
             </>}
-            {irevPreview && <div className="irev-preview-backdrop" onClick={() => setIrevPreview(null)}><section className="irev-preview-modal" onClick={(event) => event.stopPropagation()}><header><div><span className="eyebrow">INEC IREV RESULT SHEET</span><h2>{irevPreview.puCode}</h2><p>{irevPreview.lga} · {irevPreview.ward} · {irevPreview.pollingUnit}</p></div><button type="button" className="icon-btn" onClick={() => setIrevPreview(null)} aria-label="Close image preview"><FaTimes /></button></header><div className="irev-preview-body"><div className="irev-preview-image"><img src={irevPreview.imageUrl} alt={`INEC IReV result sheet for ${irevPreview.puCode}`} /></div><aside><div className="irev-preview-actions"><a href={irevPreview.imageUrl} download target="_blank" rel="noreferrer">Download image</a></div><h3>Party results</h3>{irevExtractingIds.has(irevPreview.id) && <p className="muted">Reading party votes…</p>}{irevDrafts[irevPreview.id] ? <div className="irev-ocr-draft"><div className="irev-party-results">{(irevDrafts[irevPreview.id].results || []).map(({ party, votes }) => <div key={party}><strong>{party}</strong><b>{Number(votes).toLocaleString()}</b></div>)}</div></div> : !canAdmin ? <p className="muted">Automatic extraction is available to administrators.</p> : !irevExtractingIds.has(irevPreview.id) && <p className="muted">This result sheet is queued for local OCR.</p>}</aside></div></section></div>}
+            {irevPreview && <div className="irev-preview-backdrop" onClick={() => setIrevPreview(null)}><section className="irev-preview-modal" onClick={(event) => event.stopPropagation()}><header><div><span className="eyebrow">INEC IREV RESULT SHEET</span><h2>{irevPreview.puCode}</h2><p>{irevPreview.lga} · {irevPreview.ward} · {irevPreview.pollingUnit}</p></div><button type="button" className="icon-btn" onClick={() => setIrevPreview(null)} aria-label="Close image preview"><FaTimes /></button></header><div className="irev-preview-body"><div className="irev-preview-image"><img src={irevPreview.imageUrl} alt={`INEC IReV result sheet for ${irevPreview.puCode}`} /></div><aside><div className="irev-preview-actions"><a href={irevPreview.imageUrl} download target="_blank" rel="noreferrer">Download image</a></div><h3>Party results</h3>{irevExtractingIds.has(irevPreview.id) && <p className="muted">Reading party votes…</p>}{irevDrafts[irevPreview.id] ? <div className="irev-ocr-draft"><div className="irev-party-results">{(irevDrafts[irevPreview.id].results || []).map(({ party, votes }) => <div key={party}><strong>{party}</strong><b>{Number(votes).toLocaleString()}</b></div>)}</div></div> : !canAdmin ? <p className="muted">Automatic extraction is available to administrators.</p> : !irevExtractingIds.has(irevPreview.id) && <p className="muted">This result sheet is queued for automatic reading.</p>}</aside></div></section></div>}
           </>}
           {!irevPilot && irevLoading && <p className="muted">Connecting to the official IReV feed…</p>}
         </section>}

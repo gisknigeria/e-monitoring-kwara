@@ -27,6 +27,14 @@ services:
         value: superadmin@command.local
       - key: SUPER_ADMIN_PASSWORD
         sync: false
+      - key: GROQ_API_KEY
+        sync: false
+      - key: GROQ_API_KEY_2
+        sync: false
+      - key: GROQ_API_KEY_3
+        sync: false
+      - key: GROQ_VISION_MODEL
+        value: qwen/qwen3.6-27b
       - key: METERED_DOMAIN
         sync: false
       - key: METERED_TURN_API_KEY

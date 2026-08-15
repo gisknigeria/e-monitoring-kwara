@@ -16,6 +16,11 @@ import { analyzeContextLocally, summarizeNewsLocally } from './ai.js';
 import { FALLBACK_ICE_SERVERS, normalizeMeteredDomain, normalizeMeteredRegion, sanitizeIceServers } from './turn.js';
 
 const { Pool } = pg;
+// Render instances have a tight memory ceiling. Keep libvips from retaining
+// large decoded election sheets between requests and decode only one image at
+// a time; Groq calls can still overlap after the small optimized JPEG is ready.
+sharp.cache({ memory: 16, files: 0, items: 10 });
+sharp.concurrency(1);
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const dataFile = process.env.DATA_FILE || join(__dirname, 'data.json');
 const jwtSecretFile = process.env.JWT_SECRET_FILE || `${dataFile}.jwt-secret`;
@@ -536,29 +541,87 @@ const irevOcrLimiter = createRateLimitState();
 const socketLimiter = createRateLimitState();
 const openAiPrimaryModel = process.env.OPENAI_MODEL || 'gpt-5.6-terra';
 const openAiFallbackModel = process.env.OPENAI_FALLBACK_MODEL || 'gpt-5.6-luna';
-const groqPrimaryModel = process.env.GROQ_MODEL || 'llama-3.1-8b-instant';
+const groqPrimaryModel = process.env.GROQ_MODEL || 'openai/gpt-oss-20b';
 const groqFallbackModel = process.env.GROQ_FALLBACK_MODEL || 'openai/gpt-oss-20b';
 const groqNewsModel = process.env.GROQ_NEWS_MODEL || 'groq/compound-mini';
-const callGroq = async (prompt, model) => {
-  const response = await fetch('https://api.groq.com/openai/v1/chat/completions', {
-    method: 'POST',
-    headers: {
-      Authorization: `Bearer ${process.env.GROQ_API_KEY}`,
-      'Content-Type': 'application/json',
-    },
-    body: JSON.stringify({
-      model,
-      messages: [{ role: 'user', content: prompt }],
-      temperature: 0.2,
-      max_completion_tokens: 700,
-    }),
+const groqVisionModel = process.env.GROQ_VISION_MODEL || 'qwen/qwen3.6-27b';
+const groqApiKeys = [...new Set([
+  process.env.GROQ_API_KEY,
+  process.env.GROQ_API_KEY_2,
+  process.env.GROQ_API_KEY_3,
+].map(value => String(value || '').trim()).filter(Boolean))];
+const groqKeyCooldowns = new Map();
+let groqKeyCursor = 0;
+let groqRequestQueue = Promise.resolve();
+let nextGroqRequestAt = 0;
+const waitForGroqRequestSlot = () => {
+  const scheduled = groqRequestQueue.then(async () => {
+    const waitMs = Math.max(0, nextGroqRequestAt - Date.now());
+    if (waitMs) await new Promise(resolve => setTimeout(resolve, waitMs));
+    nextGroqRequestAt = Date.now() + 2_100;
   });
-  const body = await response.json().catch(() => ({}));
-  if (!response.ok) {
-    const error = new Error(body?.error?.message || 'Groq request failed');
-    error.status = response.status;
+  groqRequestQueue = scheduled.catch(() => {});
+  return scheduled;
+};
+const callGroqApi = async payload => {
+  if (!groqApiKeys.length) {
+    const error = new Error('Groq is not configured.');
+    error.status = 503;
+    error.code = 'AI_NOT_CONFIGURED';
     throw error;
   }
+  let lastError;
+  for (let attempt = 0; attempt < groqApiKeys.length; attempt += 1) {
+    const keyIndex = groqKeyCursor % groqApiKeys.length;
+    groqKeyCursor = (groqKeyCursor + 1) % groqApiKeys.length;
+    const apiKey = groqApiKeys[keyIndex];
+    if ((groqKeyCooldowns.get(apiKey) || 0) > Date.now()) continue;
+    let response;
+    let body = {};
+    try {
+      await waitForGroqRequestSlot();
+      response = await fetch('https://api.groq.com/openai/v1/chat/completions', {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
+        signal: AbortSignal.timeout(35_000),
+        body: JSON.stringify(payload),
+      });
+      body = await response.json().catch(() => ({}));
+    } catch (cause) {
+      lastError = new Error('Groq is temporarily unavailable.');
+      lastError.status = 503;
+      lastError.cause = cause;
+      groqKeyCooldowns.set(apiKey, Date.now() + 15_000);
+      continue;
+    }
+    if (response.ok) return body;
+    lastError = new Error(body?.error?.message || 'Groq request failed');
+    lastError.status = response.status;
+    const retryAfterSeconds = Math.max(0, Number(response.headers.get('retry-after')) || 0);
+    if ([401, 403, 429, 498].includes(response.status) || response.status >= 500) {
+      const cooldownMs = response.status === 429
+        ? Math.max(60_000, Math.min(retryAfterSeconds * 1000, 15 * 60_000))
+        : response.status >= 500 || response.status === 498
+          ? 30_000
+          : 15 * 60_000;
+      groqKeyCooldowns.set(apiKey, Date.now() + cooldownMs);
+      continue;
+    }
+    throw lastError;
+  }
+  if (!lastError) {
+    lastError = new Error('All Groq keys are cooling down. Extraction will resume automatically.');
+    lastError.status = 429;
+  }
+  throw lastError;
+};
+const callGroq = async (prompt, model) => {
+  const body = await callGroqApi({
+    model,
+    messages: [{ role: 'user', content: prompt }],
+    temperature: 0.2,
+    max_completion_tokens: 700,
+  });
   return body.choices?.[0]?.message?.content || '';
 };
 const callGroqWithFallback = async (prompt) => {
@@ -875,12 +938,20 @@ const ensureIrevArchiveLoaded = () => {
   if (!irevArchiveLoadPromise) irevArchiveLoadPromise = Promise.all([
     store.setting(IREV_OSUN_ARCHIVE_KEY, null),
     store.setting(IREV_OSUN_OCR_KEY, {}),
-  ]).then(([archive, extractions]) => {
+  ]).then(async ([archive, extractions]) => {
     if (archive?.electionId === IREV_OSUN_ELECTION_ID && Array.isArray(archive.uploads)) {
       irevOsunCache = { data: { ...archive, offline: true }, expiresAt: 0 };
     }
-    for (const [id, extraction] of Object.entries(extractions || {})) {
-      if (id && Array.isArray(extraction?.results)) irevOcrCache.set(id, extraction);
+    const savedExtractions = Object.entries(extractions || {});
+    const supportedExtractions = savedExtractions.filter(([, extraction]) =>
+      ['gemini', 'groq'].includes(String(extraction?.provider || '').trim().toLowerCase())
+      && Array.isArray(extraction?.results),
+    );
+    for (const [id, extraction] of supportedExtractions) {
+      if (id) irevOcrCache.set(id, extraction);
+    }
+    if (supportedExtractions.length !== savedExtractions.length) {
+      await store.setSetting(IREV_OSUN_OCR_KEY, Object.fromEntries(supportedExtractions));
     }
   });
   return irevArchiveLoadPromise;
@@ -976,16 +1047,23 @@ app.get('/api/irev/osun', auth, rateLimit, asyncRoute(async (req, res) => {
   }
 }));
 let irevOcrPersistQueue = Promise.resolve();
-let geminiVisionCooldownUntil = 0;
-const optimizeIrevImage = imageBytes => sharp(imageBytes)
-  .rotate()
-  .trim({ background: '#ffffff', threshold: 8 })
-  .resize({ width: 1600, withoutEnlargement: true, fit: 'inside' })
-  .grayscale()
-  .normalize()
-  .sharpen()
-  .png({ compressionLevel: 6 })
-  .toBuffer();
+let irevImageOptimizationQueue = Promise.resolve();
+const optimizeIrevImage = imageBytes => {
+  const job = irevImageOptimizationQueue.then(() => sharp(imageBytes, {
+    sequentialRead: true,
+    limitInputPixels: 25_000_000,
+  })
+    .rotate()
+    .trim({ background: '#ffffff', threshold: 8 })
+    .resize({ width: 1600, withoutEnlargement: true, fit: 'inside', fastShrinkOnLoad: true })
+    .grayscale()
+    .normalize()
+    .sharpen()
+    .jpeg({ quality: 80, chromaSubsampling: '4:4:4' })
+    .toBuffer());
+  irevImageOptimizationQueue = job.catch(() => {});
+  return job;
+};
 app.post('/api/irev/osun/ocr', auth, adminOnly, irevOcrRateLimit, asyncRoute(async (req, res) => {
   const uploadId = sanitizeString(req.body?.uploadId || '');
   const pilot = await loadOsunIrevPilot();
@@ -1004,52 +1082,30 @@ app.post('/api/irev/osun/ocr', auth, adminOnly, irevOcrRateLimit, asyncRoute(asy
   } catch {
     return res.status(415).json({ code: 'OCR_IMAGE_FORMAT', message: 'This file is not a valid result-sheet image.' });
   }
-  if (!process.env.GEMINI_API_KEY) return res.status(503).json({ code: 'AI_NOT_CONFIGURED', message: 'Gemini is not configured. Saved IReV results remain available.' });
-  if (Date.now() < geminiVisionCooldownUntil) return res.status(429).json({ code: 'AI_QUOTA_EXHAUSTED', message: 'Gemini extraction is paused because its quota is unavailable. Saved IReV results remain visible and the live feed will continue updating.' });
-  const geminiModel = process.env.GEMINI_VISION_MODEL || 'gemini-2.5-flash';
-  let response;
+  if (!groqApiKeys.length) return res.status(503).json({ code: 'AI_NOT_CONFIGURED', message: 'Groq is not configured. Saved IReV results remain available.' });
+  let body;
   try {
     const optimizedImage = await optimizeIrevImage(imageBytes);
-    response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(geminiModel)}:generateContent?key=${encodeURIComponent(process.env.GEMINI_API_KEY)}`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        signal: AbortSignal.timeout(35_000),
-        body: JSON.stringify({
-          contents: [{ parts: [
-            { text: 'Read only the political-party vote table in this Nigerian INEC result sheet. Return every clearly readable party abbreviation and its vote count. Do not include totals, explanations, headings, or uncertain guesses.' },
-            { inline_data: { mime_type: 'image/png', data: optimizedImage.toString('base64') } },
-          ] }],
-          generationConfig: {
-            temperature: 0,
-            responseMimeType: 'application/json',
-            responseSchema: {
-              type: 'ARRAY',
-              items: {
-                type: 'OBJECT',
-                properties: { party: { type: 'STRING' }, votes: { type: 'INTEGER' } },
-                required: ['party', 'votes'],
-              },
-            },
-          },
-        }),
-      });
+    body = await callGroqApi({
+      model: groqVisionModel,
+      messages: [{ role: 'user', content: [
+        { type: 'text', text: 'Read only the political-party vote table in this Nigerian INEC result sheet. Return JSON exactly as {"results":[{"party":"ABC","votes":123}]}. Include every clearly readable party abbreviation and vote count. Do not include totals, explanations, headings, or uncertain guesses.' },
+        { type: 'image_url', image_url: { url: `data:image/jpeg;base64,${optimizedImage.toString('base64')}` } },
+      ] }],
+      temperature: 0,
+      max_completion_tokens: 350,
+      response_format: { type: 'json_object' },
+    });
   } catch (error) {
-    console.warn('[irev] Gemini extraction unavailable:', error.message);
-    return res.status(503).json({ code: 'AI_SERVICE_UNAVAILABLE', message: 'Gemini is temporarily unavailable. Saved IReV results remain visible and the live feed will continue updating.' });
-  }
-  const body = await response.json().catch(() => ({}));
-  if (!response.ok) {
-    const providerMessage = body?.error?.message || `Gemini returned ${response.status}`;
-    if (response.status === 429 || /quota|rate limit|resource exhausted/i.test(providerMessage)) {
-      geminiVisionCooldownUntil = Date.now() + 5 * 60_000;
-      return res.status(429).json({ code: 'AI_QUOTA_EXHAUSTED', message: 'Gemini token quota or rate limit has been reached. Extraction stopped, but saved IReV results remain visible and the live feed will continue updating.' });
-    }
-    return res.status(502).json({ code: 'AI_EXTRACTION_FAILED', message: 'Gemini could not read this result sheet.' });
+    console.warn('[irev] Groq extraction unavailable:', error.status || '', error.message);
+    if (error.status === 429) return res.status(429).json({ code: 'AI_QUOTA_EXHAUSTED', message: 'All Groq keys are currently rate-limited. Saved results remain visible and extraction will resume automatically.' });
+    return res.status(503).json({ code: 'AI_SERVICE_UNAVAILABLE', message: 'Groq is temporarily unavailable. Saved IReV results remain visible.' });
   }
   let parsed = [];
   try {
-    const responseText = body.candidates?.[0]?.content?.parts?.map(part => part.text || '').join('') || '';
-    parsed = JSON.parse(responseText);
+    const responseText = body.choices?.[0]?.message?.content || '';
+    const decoded = JSON.parse(responseText.replace(/^```json\s*|\s*```$/gi, '').trim());
+    parsed = Array.isArray(decoded) ? decoded : decoded?.results;
   } catch {
     parsed = [];
   }
@@ -1058,7 +1114,7 @@ app.post('/api/irev/osun/ocr', auth, adminOnly, irevOcrRateLimit, asyncRoute(asy
     .filter(item => item.party && Number.isInteger(item.votes) && item.votes >= 0 && item.votes <= 5000)
     .reduce((unique, item) => unique.some(existing => existing.party === item.party) ? unique : [...unique, item], []);
   if (!results.length) return res.status(502).json({ message: 'No readable party vote counts were extracted from this image.' });
-  const extraction = { uploadId, results, provider: 'gemini', model: geminiModel, sourceUrl: upload.imageUrl, extractedAt: new Date().toISOString() };
+  const extraction = { uploadId, results, provider: 'groq', model: groqVisionModel, sourceUrl: upload.imageUrl, extractedAt: new Date().toISOString() };
   irevOcrCache.set(uploadId, extraction);
   const persistenceTask = irevOcrPersistQueue.then(() => store.setSetting(IREV_OSUN_OCR_KEY, Object.fromEntries(irevOcrCache)));
   irevOcrPersistQueue = persistenceTask.catch(error => console.error('[irev] Could not persist OCR result:', error.message));
