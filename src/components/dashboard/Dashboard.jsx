@@ -3903,11 +3903,11 @@ function Dashboard({ session, onLogout, onSessionUpdate }) {
     localStorage.removeItem("command-areas");
   };
   const toggleGps = () => {
-    if (isAgent) {
-      setNotice("GPS tracking is required for Agent accounts and cannot be turned off");
-      return;
-    }
     if (sharingGps) {
+      if (isAgent) {
+        setNotice("GPS tracking is required for Agent accounts and cannot be turned off");
+        return;
+      }
       if (gpsWatchRef.current != null)
         navigator.geolocation.clearWatch(gpsWatchRef.current);
       gpsWatchRef.current = null;
@@ -3922,6 +3922,7 @@ function Dashboard({ session, onLogout, onSessionUpdate }) {
       return;
     }
     setSharingGps(true);
+    if (isAgent) setGpsRequiredBlocked(false);
     setNotice("Acquiring GPS fix...");
     gpsBestRef.current = null;
 
@@ -5923,7 +5924,7 @@ function Dashboard({ session, onLogout, onSessionUpdate }) {
           </div>
         </div>
       )}
-      {gpsRequiredBlocked && isAgent && <div className="modal-backdrop gps-required-gate"><div className="modal"><span className="eyebrow">LOCATION REQUIRED</span><h2>Allow Location</h2><p>Location sharing is mandatory for Agent accounts. The app will remain locked until you allow access and a valid location is received.</p><button className="primary wide" onClick={toggleGps} disabled={sharingGps}><LuLocateFixed /> {sharingGps ? "Waiting for Location…" : "Allow Location"}</button></div></div>}
+      {gpsRequiredBlocked && isAgent && !sharingGps && <div className="modal-backdrop gps-required-gate"><div className="modal"><span className="eyebrow">LOCATION REQUIRED</span><h2>Allow Location</h2><p>Location sharing is mandatory for Agent accounts. The app will remain locked until you allow access and a valid location is received.</p><button className="primary wide" onClick={toggleGps} disabled={sharingGps}><LuLocateFixed /> {sharingGps ? "Waiting for Location…" : "Allow Location"}</button></div></div>}
       {partyManagerOpen && canAdmin && <Suspense fallback={<div className="modal-backdrop"><div className="modal">Loading party manager…</div></div>}><PartyManager parties={parties} onClose={() => setPartyManagerOpen(false)} onSave={saveParties} /></Suspense>}
       {emergencyOpen && (
         <DashboardEmergencyPanel
