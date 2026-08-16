@@ -50,6 +50,8 @@
 .role-supervisor .map-top-controls{left:14px;right:14px}
 .role-agent .map-top-controls{display:none!important}
 .role-agent .agent-field-screen{z-index:900;overflow-y:auto;justify-content:flex-start;padding:34px 20px;min-height:100dvh}
+.role-supervisor .map-top-controls{display:none!important}
+.role-supervisor .agent-field-screen{z-index:900;overflow-y:auto;justify-content:flex-start;padding:34px 20px;min-height:100dvh}
 .agent-action-grid{display:grid;grid-template-columns:repeat(2,minmax(0,240px));gap:12px;width:min(500px,100%);margin-top:8px}
 .agent-action-card{min-height:128px;display:flex;flex-direction:column;align-items:flex-start;justify-content:center;gap:7px;text-align:left;border:1px solid #2f7a43;border-radius:14px;padding:17px;background:linear-gradient(145deg,#12351d,#071b11);box-shadow:0 10px 26px #02130a80}
 .agent-action-card svg,.agent-action-card>strong{font-size:22px!important;color:#a3e635!important}
@@ -82,6 +84,16 @@
 .agent-field-screen p{margin:0;color:#e7c77c!important}
 .agent-field-screen .primary{width:min(420px,100%);background:#8b1e46;color:#fff;border:1px solid #84cc16}
 .agent-field-screen small{max-width:520px;color:#d8bcc8!important;line-height:1.6}
+.supervisor-alert-top{position:absolute;top:18px;right:18px;z-index:3}
+.supervisor-alert-btn{display:flex;align-items:center;justify-content:center;position:relative;width:42px;height:42px;border:1px solid #2f7a43;border-radius:12px;background:linear-gradient(145deg,#12351d,#071b11);color:#fff}
+.supervisor-alert-btn span{position:absolute;top:-4px;right:-4px;min-width:18px;height:18px;border-radius:999px;background:#ef4444;color:#fff;font-size:10px;display:grid;place-items:center;padding:0 4px}
+.supervisor-field-screen .agent-action-grid{width:min(620px,100%)}
+.supervisor-field-screen .agent-action-card{min-height:112px}
+.supervisor-field-screen .agent-action-card b{font-size:14px!important}
+.supervisor-field-screen .agent-action-card span{font-size:11px!important}
+.supervisor-map-page{position:absolute;inset:0;background:#071b11;z-index:950}
+.supervisor-map-back{position:absolute;top:18px;left:18px;z-index:1000;display:flex;align-items:center;gap:8px;border:1px solid #2f7a43;border-radius:10px;background:#0d2315;color:#fff;padding:10px 14px}
+.supervisor-field-screen .agent-action-card.map{border-color:#a3e635;background:linear-gradient(145deg,#183b2d,#10271c)}
 .result-report-action{width:auto!important;padding:0 10px!important;color:#f8d984!important;font-size:10px!important;font-weight:900!important}
 
 /* Election Monitoring Command Center — wine and gold campaign theme */

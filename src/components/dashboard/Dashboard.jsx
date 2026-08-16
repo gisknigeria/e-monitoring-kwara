@@ -2690,6 +2690,7 @@ function Dashboard({ session, onLogout, onSessionUpdate }) {
   const [profileMenuOpen, setProfileMenuOpen] = useState(false);
   const [profileOpen, setProfileOpen] = useState(false);
   const [gpsRequiredBlocked, setGpsRequiredBlocked] = useState(session.user.role === "Agent");
+  const [supervisorMapOpen, setSupervisorMapOpen] = useState(false);
   const [chatPanel, setChatPanel] = useState(false);
   const [chatRooms, setChatRooms] = useState([]);
   const [activeRoom, setActiveRoom] = useState(null);
@@ -5425,7 +5426,103 @@ function Dashboard({ session, onLogout, onSessionUpdate }) {
           </div>
           <button className="agent-logout" onClick={onLogout}><FaSignOutAlt /> Logout</button>
         </div>}
-        {!isAgent && <MapView
+        {isSupervisor && !supervisorMapOpen && <div className="agent-field-screen supervisor-field-screen">
+          <div className="supervisor-alert-top">
+            <button className="supervisor-alert-btn" onClick={() => setEmergencyOpen(true)} title="Alerts">
+              <FaVolumeDown />
+              {emergencyAlerts.length > 0 && <span>{Math.min(emergencyAlerts.length, 9)}</span>}
+            </button>
+          </div>
+          <img className="agent-brand-logo" src="/pdp-logo.png" alt="Peoples Democratic Party logo" />
+          <span className="eyebrow">SUPERVISOR</span>
+          <h1>{session.user.lga || "LGA Supervisor"}</h1>
+          <p>{[session.user.state, session.user.lga].filter(Boolean).join(" • ")}</p>
+          <div className="agent-action-grid supervisor-action-grid">
+            <button className="agent-action-card result" onClick={() => setManageOfficers(true)}>
+              <FaUserCog />
+              <b>Assign</b>
+              <span>Review incidents and agents in your LGA</span>
+            </button>
+            <button className="agent-action-card result" onClick={openPollingUnitResultForm}>
+              <ReportIcon iconKey="POI" size={22} />
+              <b>Report result</b>
+              <span>Submit the latest polling unit result</span>
+            </button>
+            <button className={`agent-action-card ${sharingCamera ? "active" : ""}`} onClick={toggleCamera}>
+              <FaVideo />
+              <b>{sharingCamera ? "Stop video" : "Share video"}</b>
+              <span>Send a live video feed to command</span>
+            </button>
+            <button className="agent-action-card incident" onClick={openIncidentPointForm}>
+              <ReportIcon iconKey="IP" size={22} />
+              <b>Report incident</b>
+              <span>Log a field incident or security issue</span>
+            </button>
+            <button className="agent-action-card map" onClick={() => setSupervisorMapOpen(true)}>
+              <FaMapMarkedAlt />
+              <b>Map</b>
+              <span>Open the agent map and locations</span>
+            </button>
+            <button className={`agent-action-card sos ${sosHolding ? "sos-holding" : ""}`} {...sosHoldProps}>
+              <strong>SOS</strong>
+              <b>Send emergency alert</b>
+              <span>Trigger an urgent field alert immediately</span>
+            </button>
+          </div>
+          <button className="agent-logout" onClick={onLogout}><FaSignOutAlt /> Logout</button>
+        </div>}
+        {isSupervisor && supervisorMapOpen && (
+          <div className="supervisor-map-page">
+            <button className="supervisor-map-back" onClick={() => setSupervisorMapOpen(false)}>
+              <FaTimes /> Back
+            </button>
+            <MapView
+              incidents={mapVisibleIncidents}
+              officers={officers}
+              cameras={mapCameras}
+              mapLayers={mapLayers}
+              emergencyAlerts={showSosIncidents ? emergencyAlerts : []}
+              analysisLayers={analysisLayers}
+              selected={selected}
+              onSelect={setSelected}
+              onMapClick={(p, copyOnly) => {
+                setCoords(`${p.lat.toFixed(6)}, ${p.lng.toFixed(6)}`);
+                navigator.clipboard?.writeText(
+                  `${p.lat.toFixed(6)}, ${p.lng.toFixed(6)}`,
+                );
+                if (!copyOnly) setNewPoint(p);
+              }}
+              mapRef={mapRef}
+              layer={layer}
+              drawMode={drawMode}
+              areas={areas}
+              measurePoints={measurePoints}
+              routePoints={routePoints}
+              routeResult={routeResult}
+              routeUserPoint={routeUserPoint}
+              onAreaCreated={addArea}
+              onToolPoint={addToolPoint}
+              onMarkerTool={startToolFromPoint}
+              isAdmin={canAdmin}
+              onLayerToggle={toggleMapLayer}
+              onLayerOpacity={updateLayerOpacity}
+              showBoundaryLayer={showBoundaryLayer}
+              showStateBorders={showStateBorders}
+              showLgaBorders={showLgaBorders}
+              showBoundaryNames={showBoundaryNames}
+              partyMapAnalysis={partyMapAnalysis}
+              selectedBoundaryState={selectedBoundaryState}
+              onBoundarySelect={(id, label) => {
+                setSelectedBoundaryState(id);
+                setSelectedBoundaryLabel(label);
+              }}
+              onBoundaryClear={clearBoundarySelection}
+              focusedOfficerId={focusedOfficerId}
+              onClearOfficerFocus={setFocusedOfficerId}
+            />
+          </div>
+        )}
+        {!isAgent && !isSupervisor && <MapView
           incidents={mapVisibleIncidents}
           officers={officers}
           cameras={mapCameras}

@@ -540,12 +540,14 @@ export function IncidentForm({ point, users, onClose, onSave, isAdmin, currentUs
               </select>
             </span>
           </label>
-          <label>
-            Severity
-            <select value={form.severity} onChange={(e) => setForm({ ...form, severity: e.target.value })}>
-              {Object.keys(severityColor).map((x) => <option key={x}>{x}</option>)}
-            </select>
-          </label>
+          {currentUser?.role !== "Agent" && (
+            <label>
+              Severity
+              <select value={form.severity} onChange={(e) => setForm({ ...form, severity: e.target.value })}>
+                {Object.keys(severityColor).map((x) => <option key={x}>{x}</option>)}
+              </select>
+            </label>
+          )}
         </div>
         {isResultReport ? (
           <>
