@@ -724,6 +724,12 @@ export function OfficerManager({
       role: defaultRole,
     };
   };
+  const [form, setForm] = useState(newAccountForm);
+  const [managerTab, setManagerTab] = useState("create");
+  const [error, setError] = useState("");
+  const [roleChangeUser, setRoleChangeUser] = useState(null);
+  const [roleChangeForm, setRoleChangeForm] = useState({ role: "", state: "", lga: "", ward: "" });
+  const [roleChangeError, setRoleChangeError] = useState("");
   const wardOptions = useMemo(
     () => getRegistrationLocationOptions(form.state, form.lga).wards,
     [form.state, form.lga],
@@ -736,12 +742,6 @@ export function OfficerManager({
     () => String(roleChangeForm.ward || "").split(",").map((ward) => ward.trim()).filter(Boolean),
     [roleChangeForm.ward],
   );
-  const [form, setForm] = useState(newAccountForm);
-  const [managerTab, setManagerTab] = useState("create");
-  const [error, setError] = useState("");
-  const [roleChangeUser, setRoleChangeUser] = useState(null);
-  const [roleChangeForm, setRoleChangeForm] = useState({ role: "", state: "", lga: "", ward: "" });
-  const [roleChangeError, setRoleChangeError] = useState("");
   const locationOptions = useMemo(
     () => getRegistrationLocationOptions(form.state, form.lga, form.ward),
     [form.state, form.lga, form.ward],
