@@ -7,7 +7,7 @@ import {
   normalizeRegistrationState,
 } from './nigeriaPollingData.js';
 
-export const OPERATION_ROLES = ["Admin", "Response Team", "Supervisor", "Agent"];
+export const OPERATION_ROLES = ["Admin", "Supervisor", "Agent"];
 
 export const rankLevel = (role) => {
   if (role === "Super Admin") return -1;

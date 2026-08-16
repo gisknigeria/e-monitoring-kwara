@@ -824,16 +824,22 @@ const isAdminRole = user => ['Admin', 'Super Admin'].includes(user?.role);
 const adminOnly = (req, res, next) => isAdminRole(req.user) ? next() : res.status(403).json({ message: 'Admin access required' });
 const superAdminOnly = (req, res, next) => req.user.role === 'Super Admin' ? next() : res.status(403).json({ message: 'System administrator access required' });
 const canManageUsers = user => user?.role === 'Super Admin' || user?.role === 'Admin';
+const parseWardList = value => String(value || '').split(',').map(item => item.trim()).filter(Boolean);
+const wardMatches = (userWard, viewerWard) => {
+  const viewerWards = new Set(parseWardList(viewerWard).map(item => normalizeKey(item)));
+  const userWards = parseWardList(userWard).map(item => normalizeKey(item));
+  return userWards.some(item => viewerWards.has(item));
+};
 const visibleUsersFor = (viewer, users) => {
   const visibleUsers = users.filter(user => user.id !== viewer.id && user.role !== 'Super Admin');
   if (isAdminRole(viewer)) return visibleUsers;
-  if (viewer.role === 'Supervisor') return visibleUsers.filter(user => user.role === 'Agent' && normalizeKey(user.lga) === normalizeKey(viewer.lga) && normalizeKey(user.ward) === normalizeKey(viewer.ward));
+  if (viewer.role === 'Supervisor') return visibleUsers.filter(user => user.role === 'Agent' && normalizeKey(user.lga) === normalizeKey(viewer.lga) && wardMatches(user.ward, viewer.ward));
   if (viewer.role === 'Agent') return [];
   return visibleUsers.filter(user => canManageRank(viewer.rank, user.rank));
 };
 const canCreateUser = (viewer, rank, role) => {
-  if (viewer.role === 'Super Admin') return ['Agent', 'Supervisor', 'Response Team', 'Admin'].includes(role);
-  if (viewer.role === 'Admin') return ['Agent', 'Supervisor', 'Response Team'].includes(role);
+  if (viewer.role === 'Super Admin') return ['Agent', 'Supervisor', 'Admin'].includes(role);
+  if (viewer.role === 'Admin') return ['Agent', 'Supervisor'].includes(role);
   return false;
 };
 const canDeleteUser = (viewer, target) => {
@@ -844,7 +850,7 @@ const canDeleteUser = (viewer, target) => {
 };
 const canAccessRoom = (viewer, room) => !!room && (isAdminRole(viewer) || room.members?.includes(viewer.id));
 const isSosIncident = incident => incident?.reportType === 'SOS-Emergency' || incident?.style?.source === 'sos';
-const sameZone = (viewer, incident) => !!viewer?.lga && !!viewer?.ward && normalizeKey(viewer.lga) === normalizeKey(incident?.lga) && normalizeKey(viewer.ward) === normalizeKey(incident?.ward);
+const sameZone = (viewer, incident) => !!viewer?.lga && !!viewer?.ward && normalizeKey(viewer.lga) === normalizeKey(incident?.lga) && wardMatches(incident?.ward, viewer.ward);
 const canAccessIncident = (viewer, incident) => isAdminRole(viewer) || (viewer?.role === 'Supervisor' && sameZone(viewer, incident)) || incident.createdBy === viewer.id || incident.assignedTo === viewer.id || (incident.visibleTo || []).includes(viewer.id);
 const emitIncidentToViewers = (event, incident) => {
   for (const client of io.sockets.sockets.values()) {
