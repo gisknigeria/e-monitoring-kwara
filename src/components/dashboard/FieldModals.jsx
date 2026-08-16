@@ -691,6 +691,22 @@ export function OfficerManager({
   const isSupervisor = currentUser.role === "Supervisor";
   const canManageRoles = ["Super Admin", "Admin"].includes(currentUser.role);
   const manageableRoles = ["Supervisor", "Agent"];
+  if (!canManageRoles) {
+    return (
+      <div className="modal-backdrop">
+        <section className="modal officer-modal">
+          <div className="panel-title">
+            <div><span className="eyebrow">PERSONNEL</span><h2>Manage users</h2></div>
+            <button type="button" className="icon-btn" onClick={onClose} aria-label="Close user manager"><FaTimes /></button>
+          </div>
+          <p className="muted">Only administrators can create or manage user accounts.</p>
+          <div className="actions">
+            <button type="button" className="primary" onClick={onClose}>Close</button>
+          </div>
+        </section>
+      </div>
+    );
+  }
   const defaultRole = "Agent";
   const stateOptions = useMemo(
     () => NIGERIA_STATES.map((code) => ({ code, label: STATE_CODE_TO_NAME[code] || code })),
@@ -855,7 +871,7 @@ export function OfficerManager({
             {users.filter((user) => user.role !== "Super Admin").map((user) => (
               <div className="manage-row" key={user.id}>
                 <div className="avatar">{user.name.split(" ").map((part) => part[0]).join("").slice(0, 2)}</div>
-                <div className="manage-user-summary"><b>{user.rank ? `${user.rank} ${user.name}` : user.name}</b><small>{user.role} · {user.email}<br />{STATE_CODE_TO_NAME[user.state] || user.state || "No state"} · {user.lga || "No LGA"} · {user.ward || "No ward"} · {user.pollingUnit || user.unit || "No assignment"}</small></div>
+                <div className="manage-user-summary"><b>{user.rank ? `${user.rank} ${user.name}` : user.name}</b><small>{user.role === "Supervisor" ? "Ward Supervisor" : user.role} · {user.email}<br />{STATE_CODE_TO_NAME[user.state] || user.state || "No state"} · {user.lga || "No LGA"} · {(String(user.ward || "").split(",").map((ward) => ward.trim()).filter(Boolean).join(" • ") || "No ward")} · {user.pollingUnit || user.unit || "No assignment"}</small></div>
                 <div className="manage-user-actions">
                   <button type="button" className="unit-action-btn" onClick={() => resetPassword(user)}>Password</button>
                   {canEditAssignment(user) && <button type="button" className="unit-action-btn" onClick={() => editAssignment(user)}>Edit assignment</button>}

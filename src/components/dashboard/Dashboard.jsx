@@ -2782,17 +2782,37 @@ function Dashboard({ session, onLogout, onSessionUpdate }) {
   const isAgent = session.user.role === "Agent";
   const isSupervisor = session.user.role === "Supervisor";
   const isFieldRole = isAgent || isSupervisor;
+  const formatWardList = (value) =>
+    String(value || "")
+      .split(",")
+      .map((ward) => ward.trim())
+      .filter(Boolean);
   const canCreateCustomReportType = ["Admin", "Super Admin"].includes(
     session.user.role,
   );
   const canManagePersonnel =
     ["Super Admin", "Admin"].includes(session.user.role);
+  const parseWardList = (value) =>
+    String(value || "")
+      .split(",")
+      .map((item) => item.trim().toLowerCase())
+      .filter(Boolean);
+  const wardInScope = (itemWard, viewerWard) => {
+    const viewerWards = new Set(parseWardList(viewerWard));
+    return parseWardList(itemWard).some((ward) => viewerWards.has(ward));
+  };
+  const isSupervisorWardRelevant = (item) => {
+    if (!isSupervisor || !session.user.lga || !session.user.ward) return false;
+    if (!item) return false;
+    const sameLga = String(item.lga || "").trim().toLowerCase() === String(session.user.lga || "").trim().toLowerCase();
+    const sameWard = wardInScope(item.ward, session.user.ward);
+    const isSos = item.reportType === "SOS-Emergency" || item.style?.source === "sos";
+    return sameLga && (sameWard || isSos);
+  };
   const canSeeReport = (item) =>
     canAdmin ||
-    (isSupervisor && session.user.lga && session.user.ward &&
-      item.lga === session.user.lga && item.ward === session.user.ward) ||
+    (isSupervisor && (item.assignedTo === session.user.id || isSupervisorWardRelevant(item))) ||
     item.createdBy === session.user.id ||
-    item.assignedTo === session.user.id ||
     (item.visibleTo || []).includes(session.user.id);
   const flushOfflineVideoQueue = async () => {
     if (offlineUploadRef.current || !navigator.onLine) return;
@@ -3282,16 +3302,22 @@ function Dashboard({ session, onLogout, onSessionUpdate }) {
       stopSilentAudio();
     };
   }, []);
-  const visible = incidents.filter(
-    (i) => filter === "All" || i.severity === filter || i.status === filter,
-  );
+  const visible = incidents.filter((i) => {
+    if (isSupervisor) {
+      const isRelevant =
+        i.assignedTo === session.user.id ||
+        isSupervisorWardRelevant(i) ||
+        (i.visibleTo || []).includes(session.user.id);
+      if (!isRelevant) return false;
+    }
+    return filter === "All" || i.severity === filter || i.status === filter;
+  });
   const mapVisibleIncidents = showReports
-    ? incidents.filter(
-        (i) =>
-          !hiddenReportIds.includes(i.id) &&
-          (showSosIncidents ||
-            (i.reportType !== "SOS-Emergency" && i.style?.source !== "sos")),
-      )
+    ? incidents.filter((i) => {
+        if (isSupervisor && !canSeeReport(i)) return false;
+        if (hiddenReportIds.includes(i.id)) return false;
+        return showSosIncidents || (i.reportType !== "SOS-Emergency" && i.style?.source !== "sos");
+      })
     : [];
   const save = async (form) => {
     const item = await request("/incidents", session.token, {
@@ -4896,7 +4922,9 @@ function Dashboard({ session, onLogout, onSessionUpdate }) {
                   ? "Admin"
                   : session.user.role === "Super Admin"
                     ? "System Administrator"
-                    : session.user.role;
+                    : session.user.role === "Supervisor"
+                      ? "Ward Supervisor"
+                      : session.user.role;
                 return roleLabel !== session.user.name ? <small>{roleLabel}</small> : null;
               })()}
               {(session.user.role === "Admin" || session.user.role === "Super Admin") && (
@@ -5434,14 +5462,27 @@ function Dashboard({ session, onLogout, onSessionUpdate }) {
             </button>
           </div>
           <img className="agent-brand-logo" src="/pdp-logo.png" alt="Peoples Democratic Party logo" />
-          <span className="eyebrow">SUPERVISOR</span>
-          <h1>{session.user.lga || "LGA Supervisor"}</h1>
-          <p>{[session.user.state, session.user.lga].filter(Boolean).join(" • ")}</p>
+          <span className="eyebrow">WARD SUPERVISOR</span>
+          <h1>{session.user.lga || "Ward Supervisor"}</h1>
+          <p>
+            {[session.user.state, session.user.lga].filter(Boolean).join(" • ")}
+            {formatWardList(session.user.ward).length > 0 && (
+              <>
+                <br />
+                Wards supervised: {formatWardList(session.user.ward).join(" • ")}
+              </>
+            )}
+          </p>
           <div className="agent-action-grid supervisor-action-grid">
-            <button className="agent-action-card result" onClick={() => setManageOfficers(true)}>
+            <button className="agent-action-card result" onClick={() => {
+              setOperationsOpen(true);
+              setLiveIncidentsOpen(true);
+              setSituationalOpen(false);
+              setToolsOpen(false);
+            }}>
               <FaUserCog />
               <b>Assign</b>
-              <span>Review incidents and agents in your LGA</span>
+              <span>See assigned incidents and ward emergencies</span>
             </button>
             <button className="agent-action-card result" onClick={openPollingUnitResultForm}>
               <ReportIcon iconKey="POI" size={22} />
@@ -6029,7 +6070,7 @@ function Dashboard({ session, onLogout, onSessionUpdate }) {
           onSend={sendEmergency}
         />
       )}
-      {manageOfficers && (
+      {manageOfficers && canManagePersonnel && (
         <Suspense fallback={<div className="modal-backdrop"><div className="modal">Loading personnel manager…</div></div>}>
           <OfficerManager
             users={users}

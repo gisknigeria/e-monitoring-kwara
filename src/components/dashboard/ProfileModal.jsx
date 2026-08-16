@@ -2,6 +2,11 @@ import { useState } from "react";
 import { FaTimes } from "react-icons/fa";
 
 export default function ProfileModal({ session, onClose, onSave }) {
+  const parseWardList = (value) =>
+    String(value || "")
+      .split(",")
+      .map((ward) => ward.trim())
+      .filter(Boolean);
   const [form, setForm] = useState({
     name: session.user.name || "",
     email: session.user.email || "",
@@ -9,6 +14,8 @@ export default function ProfileModal({ session, onClose, onSave }) {
     password: "",
   });
   const [error, setError] = useState("");
+  const roleLabel = session.user.role === "Supervisor" ? "Ward Supervisor" : session.user.role;
+  const wardList = parseWardList(session.user.ward);
 
   return (
     <div className="modal-backdrop">
@@ -34,6 +41,17 @@ export default function ProfileModal({ session, onClose, onSave }) {
             <FaTimes />
           </button>
         </div>
+
+        <div className="profile-role-row">
+          <strong>{roleLabel}</strong>
+          {session.user.lga && <span>{session.user.lga}</span>}
+        </div>
+        {session.user.role === "Supervisor" && wardList.length > 0 && (
+          <div className="profile-ward-summary">
+            <span>Wards supervised</span>
+            <strong>{wardList.join(" • ")}</strong>
+          </div>
+        )}
 
         <label>
           Name
