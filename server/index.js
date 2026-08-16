@@ -549,6 +549,13 @@ const geminiApiKeys = [...new Set([
   process.env.GEMINI_API_KEY,
   process.env.GEMINI_API_KEY_2,
   process.env.GEMINI_API_KEY_3,
+  process.env.GEMINI_API_KEY_4,
+  process.env.GEMINI_API_KEY_5,
+  process.env.GEMINI_API_KEY_6,
+  process.env.GEMINI_API_KEY_7,
+  process.env.GEMINI_API_KEY_8,
+  process.env.GEMINI_API_KEY_9,
+  process.env.GEMINI_API_KEY_10,
 ].map(value => String(value || '').trim()).filter(Boolean))];
 const geminiKeyCooldowns = new Map();
 let geminiKeyCursor = 0;

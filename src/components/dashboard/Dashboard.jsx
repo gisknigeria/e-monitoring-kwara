@@ -3903,8 +3903,11 @@ function Dashboard({ session, onLogout, onSessionUpdate }) {
     localStorage.removeItem("command-areas");
   };
   const toggleGps = () => {
+    if (isAgent) {
+      setNotice("GPS tracking is required for Agent accounts and cannot be turned off");
+      return;
+    }
     if (sharingGps) {
-      if (isAgent) { setNotice("Location sharing is required for Agent accounts"); return; }
       if (gpsWatchRef.current != null)
         navigator.geolocation.clearWatch(gpsWatchRef.current);
       gpsWatchRef.current = null;
@@ -5314,13 +5317,15 @@ function Dashboard({ session, onLogout, onSessionUpdate }) {
                 <FaEraser />
               </button>
             )}
-            <button
-              className={`map-action share-location-action ${sharingGps ? "active" : ""}`}
-              onClick={toggleGps}
-              title={sharingGps ? "Stop location sharing" : "Share location"}
-            >
-              <LuLocateFixed />
-            </button>
+            {!isAgent && (
+              <button
+                className={`map-action share-location-action ${sharingGps ? "active" : ""}`}
+                onClick={toggleGps}
+                title={sharingGps ? "Stop location sharing" : "Share location"}
+              >
+                <LuLocateFixed />
+              </button>
+            )}
             <button
               className={`map-action camera-share-action ${sharingCamera ? "active" : ""}`}
               onClick={toggleCamera}
@@ -5401,10 +5406,10 @@ function Dashboard({ session, onLogout, onSessionUpdate }) {
               <b>Report result</b>
               <span>Add counts and signed-result photo</span>
             </button>
-            <button className={`agent-action-card ${sharingGps ? "active" : ""}`} onClick={toggleGps}>
-              <LuLocateFixed />
-              <b>{sharingGps ? "Stop GPS" : "Share GPS & location"}</b>
-              <span>{sharingGps ? "Your live position is being shared" : "Send your current field position"}</span>
+            <button className="agent-action-card incident" onClick={openIncidentPointForm}>
+              <ReportIcon iconKey="IP" size={22} />
+              <b>Report incident</b>
+              <span>Log a field issue, hazard, or security concern</span>
             </button>
             <button className={`agent-action-card ${sharingCamera ? "active" : ""}`} onClick={toggleCamera}>
               <FaVideo />
