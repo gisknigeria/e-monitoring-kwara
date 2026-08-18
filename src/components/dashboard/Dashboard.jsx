@@ -8,6 +8,7 @@ import {
   FaCamera,
   FaChartBar,
   FaCircle,
+  FaClipboardList,
   FaComments,
   FaDrawPolygon,
   FaEraser,
@@ -87,6 +88,7 @@ import Toast from "../ui/Toast.jsx";
 import NotificationCenter from "./NotificationCenter.jsx";
 import AssignIncidentModal from "./AssignIncidentModal.jsx";
 import IncidentNotificationModal from "./IncidentNotificationModal.jsx";
+import SupervisorIncidentListModal from "./SupervisorIncidentListModal.jsx";
 import "../../notification-styles.css";
 
 const loadFieldModals = () => import("./FieldModals.jsx");
@@ -2702,6 +2704,7 @@ function Dashboard({ session, onLogout, onSessionUpdate }) {
   const [notifications, setNotifications] = useState([]);
   const [assignIncidentOpen, setAssignIncidentOpen] = useState(false);
   const [incidentToAssign, setIncidentToAssign] = useState(null);
+  const [supervisorIncidentsOpen, setSupervisorIncidentsOpen] = useState(false);
   const [notificationModalOpen, setNotificationModalOpen] = useState(false);
   const [selectedNotification, setSelectedNotification] = useState(null);
   const [selectedIncident, setSelectedIncident] = useState(null);
@@ -3339,6 +3342,14 @@ function Dashboard({ session, onLogout, onSessionUpdate }) {
       setNotifications((old) => [result.notification, ...old.filter((item) => item.id !== result.notification.id)]);
     }
     return result;
+  };
+  const handleClaimIncident = async (incidentId) => {
+    const message = `I am claiming this incident for myself.`;
+    return handleAssignIncident({
+      incidentId,
+      assignedUserId: session.user.id,
+      message,
+    });
   };
   const handleNotificationClick = (notification) => {
     const incident = incidents.find((item) => item.id === notification.incidentId) || selectedIncident;
@@ -5064,6 +5075,9 @@ function Dashboard({ session, onLogout, onSessionUpdate }) {
                 <button onClick={openIncidentPointForm}>
                   <ReportIcon iconKey="IP" size={15} /> Report Incident
                 </button>
+                <button onClick={() => setSupervisorIncidentsOpen(true)}>
+                  <FaClipboardList /> View Ward Incidents
+                </button>
                 <button className={sharingGps ? "sharing" : ""} onClick={toggleGps}>
                   <FaBullseye /> {sharingGps ? "Stop GPS" : "Share GPS"}
                 </button>
@@ -6127,6 +6141,16 @@ function Dashboard({ session, onLogout, onSessionUpdate }) {
             setIncidentToAssign(null);
           }}
           onAssign={handleAssignIncident}
+        />
+      )}
+      {supervisorIncidentsOpen && isSupervisor && (
+        <SupervisorIncidentListModal
+          incidents={incidents}
+          currentUser={session.user}
+          users={users}
+          onClose={() => setSupervisorIncidentsOpen(false)}
+          onAssign={handleAssignIncident}
+          onClaim={handleClaimIncident}
         />
       )}
       {notificationModalOpen && selectedNotification && (
