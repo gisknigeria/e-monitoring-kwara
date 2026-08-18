@@ -3383,6 +3383,7 @@ function Dashboard({ session, onLogout, onSessionUpdate }) {
     fetchNotifications();
   }, [session.token]);
   const visible = incidents.filter((i) => {
+    if (i.reportType === POLLING_RESULT_TYPE) return false;
     if (isSupervisor) {
       const isRelevant =
         i.assignedTo === session.user.id ||
@@ -3392,6 +3393,7 @@ function Dashboard({ session, onLogout, onSessionUpdate }) {
     }
     return filter === "All" || i.severity === filter || i.status === filter;
   });
+  const liveIncidentCount = incidents.filter((item) => item.reportType !== POLLING_RESULT_TYPE).length;
   const mapVisibleIncidents = showReports
     ? incidents.filter((i) => {
         if (isSupervisor && !canSeeReport(i)) return false;
@@ -5177,7 +5179,7 @@ function Dashboard({ session, onLogout, onSessionUpdate }) {
                     return next;
                   })}
                 >
-                  <h2>Live Incidence <em>{incidents.length}</em></h2>
+                  <h2>Live Incidence <em>{liveIncidentCount}</em></h2>
                   <span>{liveIncidentsOpen ? "−" : "+"}</span>
                 </button>
                 {liveIncidentsOpen && (
@@ -5863,49 +5865,6 @@ function Dashboard({ session, onLogout, onSessionUpdate }) {
               </dd>
             </div>
             <div>
-              <dt>ASSIGNED UNIT</dt>
-              <dd>
-                {canAdmin ? (
-                  <select
-                    className="assign-select"
-                    value={selected.assignedTo || ""}
-                    onChange={async (e) => {
-                      const item = await request(`/incidents/${selected.id}`, session.token, {
-                        method: "PUT",
-                        body: JSON.stringify({ assignedTo: e.target.value }),
-                      });
-                      setIncidents((old) => old.map((i) => (i.id === item.id ? item : i)));
-                      setSelected(item);
-                    }}
-                  >
-                    <option value="">— Unassigned —</option>
-                    {users
-                      .filter((u) => u.role === "Response Team")
-                      .map((u) => (
-                        <option key={u.id} value={u.id}>
-                          {u.name}{u.station ? ` · ${u.station}` : ""}
-                        </option>
-                      ))}
-                    {users.filter((u) => u.role === "Agent").length > 0 && (
-                      <optgroup label="── Agents ──">
-                        {users
-                          .filter((u) => u.role === "Agent")
-                          .map((u) => (
-                            <option key={u.id} value={u.id}>
-                              {u.name}{u.pollingUnit ? ` · ${u.pollingUnit}` : ""}
-                            </option>
-                          ))}
-                      </optgroup>
-                    )}
-                  </select>
-                ) : (
-                  reportUsers.find((x) => x.id === selected.assignedTo)?.name ||
-                  officers.find((x) => x.id === selected.assignedTo)?.name ||
-                  "Unassigned"
-                )}
-              </dd>
-            </div>
-            <div>
               <dt>VISIBLE TO</dt>
               <dd>
                 {canAdmin
@@ -5921,21 +5880,6 @@ function Dashboard({ session, onLogout, onSessionUpdate }) {
               <dd>{new Date(selected.createdAt).toLocaleString()}</dd>
             </div>
           </dl>
-          <label>
-            Response status
-            <select
-              value={
-                ["In Progress", "Resolved"].includes(selected.status)
-                  ? selected.status
-                  : "In Progress"
-              }
-              onChange={(e) => updateStatus(e.target.value)}
-            >
-              {["In Progress", "Resolved"].map((x) => (
-                <option key={x}>{x}</option>
-              ))}
-            </select>
-          </label>
           <button
             className="primary wide"
             onClick={() =>
@@ -5943,50 +5887,6 @@ function Dashboard({ session, onLogout, onSessionUpdate }) {
             }
           >
             Center on incident
-          </button>
-          <button
-            className="ghost wide"
-            onClick={() => toggleReportOnMap(selected)}
-          >
-            {hiddenReportIds.includes(selected.id)
-              ? "Show incident on my map"
-              : "Hide incident from my map"}
-          </button>
-          <div className="detail-tool-row">
-            <button
-              onClick={() =>
-                startToolFromPoint("measure", {
-                  lat: selected.lat,
-                  lng: selected.lng,
-                  label: selected.title,
-                })
-              }
-            >
-              Measure from incident
-            </button>
-            <button
-              onClick={() =>
-                startToolFromPoint("route", {
-                  lat: selected.lat,
-                  lng: selected.lng,
-                  label: selected.title,
-                })
-              }
-            >
-              Route from incident
-            </button>
-          </div>
-          <button
-            className="share-map-tool wide"
-            onClick={() =>
-              shareMap({
-                filePrefix: "election-monitor-incident",
-                title: `Incident: ${selected.title}`,
-                text: `${selected.title} - ${selected.reportType || "Incident"} - ${selected.severity} - ${selected.status}\nLocation: ${selected.lat.toFixed(5)}, ${selected.lng.toFixed(5)}\n${selected.description || ""}`,
-              })
-            }
-          >
-            Share incident
           </button>
           <button
             className="primary wide"

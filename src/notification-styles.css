@@ -183,6 +183,15 @@
 /* Incident Assign Modal */
 .incident-assign-modal {
   max-width: 500px;
+  max-height: 88vh;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.incident-assign-modal .modal-content {
+  overflow-y: auto;
+  min-height: 0;
 }
 
 .incident-assign-modal .modal-header {
