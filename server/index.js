@@ -94,6 +94,7 @@ const seed = {
   chatRooms: [],
   chatMembers: [],
   chatMessages: [],
+  notifications: [],
   parties: []
 };
 
@@ -103,6 +104,7 @@ let jsonDb = existsSync(dataFile)
 jsonDb.cameras ||= [];
 jsonDb.mapLayers ||= [];
 jsonDb.chatRooms ||= [];
+jsonDb.notifications ||= [];
 jsonDb.chatMembers ||= [];
 jsonDb.chatMessages ||= [];
 jsonDb.parties ||= [];
@@ -134,6 +136,7 @@ const publicUser = ({ password, ...user }) => user;
 const asyncRoute = fn => (req, res, next) => Promise.resolve(fn(req, res, next)).catch(next);
 const toUser = row => row && ({ id: row.id, name: row.name, email: row.email, password: row.password, role: row.role, rank: row.rank || '', active: row.active, unit: row.unit, unitType: row.unit_type || 'Division', command: row.command || '', division: row.division || '', station: row.station || '', state: row.state || '', lga: row.lga || '', ward: row.ward || '', pollingUnit: row.polling_unit || '', lat: Number(row.lat) || 8.4799, lng: Number(row.lng) || 4.5418 });
 const toIncident = row => row && ({ id: row.id, title: row.title, description: row.description, reportType: row.report_type || 'IP', severity: row.severity, status: row.status, lat: Number(row.lat), lng: Number(row.lng), assignedTo: row.assigned_to || '', visibleTo: row.visible_to || [], media: row.media || [], geometry: row.geometry || null, style: row.style || null, lga: row.lga || '', ward: row.ward || '', pollingUnit: row.polling_unit || '', resultCount: row.result_count || '', createdAt: row.created_at?.toISOString?.() || row.created_at, updatedAt: row.updated_at?.toISOString?.() || row.updated_at, createdBy: row.created_by || '' });
+const toNotification = row => row && ({ id: row.id, userId: row.user_id, incidentId: row.incident_id || '', message: row.message, incidentType: row.incident_type || '', read: Boolean(row.read), createdAt: row.created_at?.toISOString?.() || row.created_at });
 const toCamera = row => row && ({ id: row.id, name: row.name, type: row.type, url: row.url, lat: Number(row.lat), lng: Number(row.lng), status: row.status, createdAt: row.created_at?.toISOString?.() || row.created_at });
 const toMapLayer = row => row && ({ id: row.id, name: row.name, type: row.type, data: row.data, url: row.url || '', bounds: row.bounds, opacity: Number(row.opacity ?? 0.65), fillOpacity: Number(row.fill_opacity ?? 0.18), category: row.category || (row.type === 'raster' ? 'Raster' : 'Point'), operationalUse: row.operational_use || 'Reference', color: row.color || '#facc15', fillColor: row.fill_color || '#f59e0b', lineWeight: Number(row.line_weight || 2), lineStyle: row.line_style || 'solid', pointIcon: row.point_icon || 'pin', pointIconColor: row.point_icon_color || '#ffffff', pointSize: Number(row.point_size || 24), showLabels: row.show_labels ?? true, labelField: row.label_field || 'name', popupFields: row.popup_fields || '', visible: row.visible ?? true, zIndex: Number(row.z_index || 0), createdAt: row.created_at?.toISOString?.() || row.created_at, updatedAt: row.updated_at?.toISOString?.() || row.updated_at });
 const toChatRoom = row => row && ({ id: row.id, name: row.name, type: row.type || 'room', incidentId: row.incident_id || '', createdBy: row.created_by || '', createdAt: row.created_at?.toISOString?.() || row.created_at, members: row.members || [] });
@@ -238,6 +241,15 @@ async function initPostgres() {
       room_id text not null,
       sender_id text not null,
       body text not null,
+      created_at timestamptz default now()
+    );
+    create table if not exists notifications (
+      id text primary key,
+      user_id text not null,
+      incident_id text default '',
+      message text not null,
+      incident_type text default '',
+      read boolean default false,
       created_at timestamptz default now()
     );
     create table if not exists app_settings (key text primary key, value jsonb not null default '[]'::jsonb);
@@ -403,6 +415,30 @@ const store = {
   async deleteIncident(id) {
     if (!pool) { jsonDb.incidents = jsonDb.incidents.filter(i => i.id !== id); saveJson(); return; }
     await pool.query('delete from incidents where id=$1', [id]);
+  },
+  async notifications(userId) {
+    if (!pool) return jsonDb.notifications?.filter(n => n.userId === userId) || [];
+    const { rows } = await pool.query('select * from notifications where user_id=$1 order by created_at desc', [userId]);
+    return rows.map(toNotification);
+  },
+  async createNotification(notification) {
+    if (!pool) { jsonDb.notifications ||= []; jsonDb.notifications.push(notification); saveJson(); return notification; }
+    const { rows } = await pool.query('insert into notifications (id,user_id,incident_id,message,incident_type,read,created_at) values ($1,$2,$3,$4,$5,$6,$7) returning *', [notification.id, notification.userId, notification.incidentId || '', notification.message, notification.incidentType || '', false, notification.createdAt]);
+    return toNotification(rows[0]);
+  },
+  async markNotificationAsRead(notificationId) {
+    if (!pool) {
+      const notification = (jsonDb.notifications || []).find(n => n.id === notificationId);
+      if (notification) notification.read = true;
+      saveJson();
+      return notification;
+    }
+    const { rows } = await pool.query('update notifications set read=true where id=$1 returning *', [notificationId]);
+    return toNotification(rows[0]);
+  },
+  async deleteNotification(notificationId) {
+    if (!pool) { jsonDb.notifications = (jsonDb.notifications || []).filter(n => n.id !== notificationId); saveJson(); return; }
+    await pool.query('delete from notifications where id=$1', [notificationId]);
   },
   async cameras() {
     if (!pool) return jsonDb.cameras;
@@ -1694,6 +1730,48 @@ app.post('/api/incidents/:id/chat', auth, rateLimit, asyncRoute(async (req, res)
   const room = await store.incidentChatRoom(incident, req.user);
   io.emit('chat:room', room);
   res.json(room);
+}));
+app.post('/api/incidents/:id/assign', auth, adminOnly, rateLimit, asyncRoute(async (req, res) => {
+  const incident = (await store.incidents()).find(item => item.id === req.params.id);
+  if (!incident) return res.status(404).json({ message: 'Incident not found' });
+  const assignedUserId = String(req.body.assignedUserId || '').trim();
+  const message = normalizeText(req.body.message || '').trim();
+  if (!assignedUserId || !message) return res.status(400).json({ message: 'Both a user and message are required' });
+  const targetUser = (await store.users()).find(u => u.id === assignedUserId);
+  if (!targetUser) return res.status(404).json({ message: 'User not found' });
+  const updated = await store.updateIncident(req.params.id, { assignedTo: assignedUserId });
+  if (!updated) return res.status(404).json({ message: 'Incident not found' });
+  const notification = await store.createNotification({
+    id: createId('notif'),
+    userId: assignedUserId,
+    incidentId: incident.id,
+    message,
+    incidentType: incident.reportType,
+    createdAt: new Date().toISOString()
+  });
+  emitIncidentToViewers('incident:updated', updated);
+  for (const socket of io.sockets.sockets.values()) {
+    if (socket.data.authUser?.id === assignedUserId) {
+      socket.emit('notification:new', notification);
+    }
+  }
+  res.json({ incident: updated, notification });
+}));
+app.get('/api/notifications', auth, rateLimit, asyncRoute(async (req, res) => {
+  const notifications = await store.notifications(req.user.id);
+  res.json(notifications);
+}));
+app.put('/api/notifications/:id/read', auth, rateLimit, asyncRoute(async (req, res) => {
+  const notification = await store.markNotificationAsRead(req.params.id);
+  if (!notification || notification.userId !== req.user.id) return res.status(404).json({ message: 'Notification not found' });
+  res.json(notification);
+}));
+app.delete('/api/notifications/:id', auth, rateLimit, asyncRoute(async (req, res) => {
+  const notifications = await store.notifications(req.user.id);
+  const notification = notifications.find(n => n.id === req.params.id);
+  if (!notification) return res.status(404).json({ message: 'Notification not found' });
+  await store.deleteNotification(req.params.id);
+  res.status(204).end();
 }));
 app.get('/api/cameras', auth, rateLimit, asyncRoute(async (_, res) => res.json(await store.cameras())));
 app.post('/api/cameras', auth, adminOnly, rateLimit, asyncRoute(async (req, res) => {

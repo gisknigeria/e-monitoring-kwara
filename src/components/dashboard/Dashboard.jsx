@@ -84,6 +84,10 @@ import DashboardEmergencyPanel from "./EmergencyPanel.jsx";
 import DashboardMapDataPanel from "./MapDataPanel.jsx";
 import DashboardToolsPanel from "./ToolsPanel.jsx";
 import Toast from "../ui/Toast.jsx";
+import NotificationCenter from "./NotificationCenter.jsx";
+import AssignIncidentModal from "./AssignIncidentModal.jsx";
+import IncidentNotificationModal from "./IncidentNotificationModal.jsx";
+import "../../notification-styles.css";
 
 const loadFieldModals = () => import("./FieldModals.jsx");
 const DashboardCameraPanel = lazy(() => import("./CameraPanel.jsx"));
@@ -2695,6 +2699,12 @@ function Dashboard({ session, onLogout, onSessionUpdate }) {
   const [chatRooms, setChatRooms] = useState([]);
   const [activeRoom, setActiveRoom] = useState(null);
   const [chatMessages, setChatMessages] = useState([]);
+  const [notifications, setNotifications] = useState([]);
+  const [assignIncidentOpen, setAssignIncidentOpen] = useState(false);
+  const [incidentToAssign, setIncidentToAssign] = useState(null);
+  const [notificationModalOpen, setNotificationModalOpen] = useState(false);
+  const [selectedNotification, setSelectedNotification] = useState(null);
+  const [selectedIncident, setSelectedIncident] = useState(null);
   const [updateReady, setUpdateReady] = useState(false);
   const [mapMenu, setMapMenu] = useState("");
   const [sidebarWidth, setSidebarWidth] = useState(
@@ -3191,6 +3201,9 @@ function Dashboard({ session, onLogout, onSessionUpdate }) {
         setChatMessages([]);
       }
     });
+    socket.on("notification:new", (notification) => {
+      setNotifications((old) => [notification, ...old]);
+    });
     socket.on("camera:shares:list", (feeds) => setPhoneShares(feeds));
     socket.on("camera:share:start", (feed) =>
       setPhoneShares((old) =>
@@ -3302,6 +3315,73 @@ function Dashboard({ session, onLogout, onSessionUpdate }) {
       stopSilentAudio();
     };
   }, []);
+  const unreadCount = notifications.filter((item) => !item.read).length;
+  const fetchNotifications = async () => {
+    try {
+      const data = await request("/notifications", session.token);
+      setNotifications(Array.isArray(data) ? data : []);
+    } catch (error) {
+      console.warn("Unable to load notifications", error);
+    }
+  };
+  const handleAssignIncident = async ({ incidentId, assignedUserId, message }) => {
+    const result = await request(`/incidents/${incidentId}/assign`, session.token, {
+      method: "POST",
+      body: JSON.stringify({ assignedUserId, message }),
+    });
+    setIncidents((old) =>
+      old.map((item) => (item.id === incidentId ? { ...item, assignedTo: assignedUserId, status: "In Progress" } : item)),
+    );
+    setSelected((old) =>
+      old && old.id === incidentId ? { ...old, assignedTo: assignedUserId, status: "In Progress" } : old,
+    );
+    if (result?.notification) {
+      setNotifications((old) => [result.notification, ...old.filter((item) => item.id !== result.notification.id)]);
+    }
+    return result;
+  };
+  const handleNotificationClick = (notification) => {
+    const incident = incidents.find((item) => item.id === notification.incidentId) || selectedIncident;
+    setSelectedIncident(incident || null);
+    setSelectedNotification(notification);
+    setNotificationModalOpen(true);
+    if (!notification.read) {
+      request(`/notifications/${notification.id}/read`, session.token, { method: "PUT" })
+        .then((updated) => {
+          setNotifications((old) =>
+            old.map((item) => (item.id === updated.id ? updated : item)),
+          );
+        })
+        .catch(() => {});
+    }
+  };
+  const handleNotificationDone = async (incidentId) => {
+    if (!selectedNotification) return;
+    const updated = await request(`/notifications/${selectedNotification.id}/read`, session.token, {
+      method: "PUT",
+    });
+    setNotifications((old) => old.map((item) => (item.id === updated.id ? updated : item)));
+    setSelectedIncident((old) => (old && old.id === incidentId ? { ...old, status: "Resolved" } : old));
+    setIncidents((old) => old.map((item) => (item.id === incidentId ? { ...item, status: "Resolved" } : item)));
+    if (incidentId) {
+      await request(`/incidents/${incidentId}`, session.token, {
+        method: "PUT",
+        body: JSON.stringify({ status: "Resolved" }),
+      }).catch(() => {});
+    }
+    setNotificationModalOpen(false);
+    setSelectedNotification(null);
+    setSelectedIncident(null);
+  };
+  const handleOpenNotificationChat = async (incidentId) => {
+    const incident = incidents.find((item) => item.id === incidentId) || selectedIncident;
+    if (!incident) throw new Error("Incident not found");
+    setNotificationModalOpen(false);
+    await openIncidentChat(incident);
+  };
+  useEffect(() => {
+    fetchNotifications();
+  }, [session.token]);
   const visible = incidents.filter((i) => {
     if (isSupervisor) {
       const isRelevant =
@@ -5404,6 +5484,7 @@ function Dashboard({ session, onLogout, onSessionUpdate }) {
             </button>
           </div>
           <div className="map-top-right">
+            {!isFieldRole && <NotificationCenter notifications={notifications} unreadCount={unreadCount} onNotificationClick={handleNotificationClick} />}
             {!isFieldRole && <form className="coord-jump" onSubmit={jump}>
               <span>COORD</span>
               <input
@@ -5914,6 +5995,17 @@ function Dashboard({ session, onLogout, onSessionUpdate }) {
             Open incident chat
           </button>
           {canAdmin && (
+            <button
+              className="primary wide"
+              onClick={() => {
+                setIncidentToAssign(selected);
+                setAssignIncidentOpen(true);
+              }}
+            >
+              Assign
+            </button>
+          )}
+          {canAdmin && (
             <button className="delete-incident wide" onClick={deleteIncident}>
               Delete incident
             </button>
@@ -6124,6 +6216,31 @@ function Dashboard({ session, onLogout, onSessionUpdate }) {
           onSend={sendChatMessage}
           onAddMember={addChatMember}
           onDeleteRoom={deleteChatRoom}
+        />
+      )}
+      {assignIncidentOpen && incidentToAssign && (
+        <AssignIncidentModal
+          incident={incidentToAssign}
+          users={users}
+          onClose={() => {
+            setAssignIncidentOpen(false);
+            setIncidentToAssign(null);
+          }}
+          onAssign={handleAssignIncident}
+        />
+      )}
+      {notificationModalOpen && selectedNotification && (
+        <IncidentNotificationModal
+          notification={selectedNotification}
+          incident={selectedIncident || incidents.find((item) => item.id === selectedNotification.incidentId) || null}
+          currentUser={session.user}
+          onClose={() => {
+            setNotificationModalOpen(false);
+            setSelectedNotification(null);
+            setSelectedIncident(null);
+          }}
+          onMarkDone={handleNotificationDone}
+          onOpenChat={handleOpenNotificationChat}
         />
       )}
       {notice && <Toast message={notice} />}
