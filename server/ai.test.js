@@ -37,3 +37,15 @@ test('analyzeContextLocally produces a post-election evidence brief', () => {
   assert.match(analysis, /Ilorin West \/ Adewole/i);
   assert.match(analysis, /not a legal conclusion/i);
 });
+
+test('analyzeContextLocally produces a coverage-aware pre-election brief', () => {
+  const analysis = analyzeContextLocally({
+    analysisMode: 'PRE_ELECTION',
+    selectedDataset: { year: 2023, election: 'Senate', level: '3 districts', status: 'partial', missing: 'Candidate vote totals' },
+    historicalResult: { metric: 'wins', parties: [{ party: 'APC', value: 3 }], note: 'Winner-only record.' },
+  });
+
+  assert.match(analysis, /historical baseline, not a prediction/i);
+  assert.match(analysis, /Candidate vote totals/i);
+  assert.match(analysis, /partial/i);
+});

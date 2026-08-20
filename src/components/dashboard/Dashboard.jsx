@@ -89,6 +89,7 @@ import NotificationCenter from "./NotificationCenter.jsx";
 import AssignIncidentModal from "./AssignIncidentModal.jsx";
 import IncidentNotificationModal from "./IncidentNotificationModal.jsx";
 import SupervisorIncidentListModal from "./SupervisorIncidentListModal.jsx";
+import PreElectionAnalysis from "./PreElectionAnalysis.jsx";
 import "../../notification-styles.css";
 
 const loadFieldModals = () => import("./FieldModals.jsx");
@@ -2284,7 +2285,7 @@ function ResultsCenter({ incidents, parties = [], officers = [], personnel = [],
     }
   };
   useEffect(() => {
-    if (view !== "irev") return undefined;
+    if (!["irev", "post"].includes(view)) return undefined;
     loadIrevPilot();
     const timer = window.setInterval(() => loadIrevPilot(), 60_000);
     return () => window.clearInterval(timer);
@@ -2326,7 +2327,7 @@ function ResultsCenter({ incidents, parties = [], officers = [], personnel = [],
     if (canAdmin && !irevDrafts[upload.id] && !irevExtractingIds.has(upload.id)) extractIrevText(upload.id);
   };
   useEffect(() => {
-    if ((view !== "irev" && !compareWithIrev) || !canAdmin || irevAutoStopped || !irevPilot?.uploads?.length) return undefined;
+    if ((!['irev', 'post'].includes(view) && !compareWithIrev) || !canAdmin || irevAutoStopped || !irevPilot?.uploads?.length) return undefined;
     const availableSlots = Math.max(0, 2 - irevExtractingIds.size);
     const nextUploads = irevPilot.uploads.filter((upload) => !irevDrafts[upload.id] && !irevFailedIds.has(upload.id) && !irevExtractingIds.has(upload.id)).slice(0, availableSlots);
     if (!nextUploads.length) return undefined;
@@ -2457,7 +2458,12 @@ function ResultsCenter({ incidents, parties = [], officers = [], personnel = [],
   }, [incidents]);
   const postElection = useMemo(() => {
     const unitKey = (row) => `${row.lga || ""}|${row.ward || ""}|${row.pollingUnit || ""}`;
-    const compareResults = (left, right) => summary.partyNames.every((party) => Number(left?.results?.find((item) => item.party === party)?.votes || 0) === Number(right?.results?.find((item) => item.party === party)?.votes || 0));
+    const compareResults = (left, right) => summary.partyNames.every((party) => {
+      const partyKey = normalizeResultKeyPart(party);
+      const leftVotes = Number(left?.results?.find((item) => normalizeResultKeyPart(item.party) === partyKey)?.votes || 0);
+      const rightVotes = Number(right?.results?.find((item) => normalizeResultKeyPart(item.party) === partyKey)?.votes || 0);
+      return leftVotes === rightVotes;
+    });
     const fieldMismatches = [...fieldRowsByUnit.entries()].filter(([, pair]) => pair.Agent && pair.Supervisor && !compareResults(pair.Agent, pair.Supervisor));
     const irevMismatches = [...fieldRowsByUnit.entries()].filter(([key, pair]) => {
       const official = irevRowsByUnit.get(key);
@@ -2650,6 +2656,10 @@ function ResultsCenter({ incidents, parties = [], officers = [], personnel = [],
       ? <button type="button" className="field-count-mismatch" onClick={() => setFieldMismatchDetail({ pollingUnit: row.pollingUnit, lga: row.lga, ward: row.ward, party, agentVotes, supervisorVotes })}>{count}</button>
       : <span className="field-count-match">{count}</span>;
   };
+  const runPreElectionAnalysis = (context) => request("/analysis/ai", authToken, {
+    method: "POST",
+    body: JSON.stringify({ context }),
+  });
   return (
     <div className="results-center">
       <header className="results-center-head">
@@ -2660,9 +2670,10 @@ function ResultsCenter({ incidents, parties = [], officers = [], personnel = [],
         </div>
         <button className="icon-btn" onClick={onClose} title="Close dashboard"><FaTimes /></button>
       </header>
-      <div className="rc-tab-bar"><button className={view === "pulse" ? "rc-tab active" : "rc-tab"} onClick={() => setView("pulse")}>Pulse</button><button className={view === "action" ? "rc-tab active" : "rc-tab"} onClick={() => setView("action")}>Action</button><button className={["breakdown", "winloss", "winloss-lga"].includes(view) ? "rc-tab active" : "rc-tab"} onClick={() => setView("breakdown")}>Result</button><button className={view === "post" ? "rc-tab active" : "rc-tab"} onClick={() => setView("post")}>Post-Election</button><button className={view === "irev" ? "rc-tab active" : "rc-tab"} onClick={() => setView("irev")}>IReV</button><button className={view === "news" ? "rc-tab active" : "rc-tab"} onClick={() => setView("news")}>News</button></div>
+      <div className="rc-tab-bar"><button className={view === "pulse" ? "rc-tab active" : "rc-tab"} onClick={() => setView("pulse")}>Pulse</button><button className={view === "action" ? "rc-tab active" : "rc-tab"} onClick={() => setView("action")}>Action</button><button className={["breakdown", "winloss", "winloss-lga"].includes(view) ? "rc-tab active" : "rc-tab"} onClick={() => setView("breakdown")}>Result</button><button className={view === "pre" ? "rc-tab active" : "rc-tab"} onClick={() => setView("pre")}>Pre-Election</button><button className={view === "post" ? "rc-tab active" : "rc-tab"} onClick={() => setView("post")}>Post-Election</button><button className={view === "irev" ? "rc-tab active" : "rc-tab"} onClick={() => setView("irev")}>IReV</button><button className={view === "news" ? "rc-tab active" : "rc-tab"} onClick={() => setView("news")}>News</button></div>
       <main className="results-center-body">
         {view === "pulse" && <AnalyticsPanel incidents={incidents} officers={officers} mapLayers={mapLayers} selected={selected} onClose={onClose} onTool={onTool} onCsv={onCsv} onClear={onClear} embedded />}
+        {view === "pre" && <PreElectionAnalysis onAnalyze={runPreElectionAnalysis} />}
         {["breakdown", "winloss", "winloss-lga"].includes(view) && <div className="wl-sub-tabs result-view-tabs"><button className={view === "breakdown" ? "wl-sub-tab active" : "wl-sub-tab"} onClick={() => setView("breakdown")}>Polling Unit Breakdown</button><button className={view !== "breakdown" ? "wl-sub-tab active" : "wl-sub-tab"} onClick={() => setView("winloss")}>Win / Loss Analysis</button></div>}
         {["winloss", "winloss-lga"].includes(view) && <section className="result-total-strip"><article className="result-total-card grand"><span>Current projection</span><strong>{forecast.leader || "—"}</strong><small>{forecast.confidence}% indicative confidence; not a final result</small></article><article className="result-total-card"><span>Vote margin</span><strong>{forecast.margin.toLocaleString()}</strong><small>Against second place</small></article><article className="result-total-card"><span>Units covered</span><strong>{forecast.coverage.toLocaleString()}</strong><small>Unique submitted units</small></article></section>}
         {view === "news" && <section className="result-table-card"><div className="result-table-title"><div><h2>Kwara State News</h2><p>General Kwara State coverage, including politics, INEC, elections, parties, governance, security, and major local developments.</p></div><div className="analysis-actions news-actions"><button className="primary action-btn refresh-news-btn" onClick={() => { setNews([]); setNewsSummary(""); setNewsSummaryError(""); setView("news"); }}><FaSyncAlt /> <span>Refresh</span></button><button className="secondary action-btn summary-action-btn" disabled={!news.length || newsSummaryLoading} onClick={() => { setNewsSummaryLoading(true); setNewsSummaryError(""); request("/news/summary", authToken, { method: "POST", body: JSON.stringify({ articles: news }) }).then((x) => { setNewsSummary(x.summary || "No summary available yet."); if (x.provider === "local") setNewsSummaryError("The summary service was unavailable, so a local fallback was generated."); else setNewsSummaryError(""); }).catch((error) => { setNewsSummary(""); setNewsSummaryError(error.message || "The summary request failed."); }).finally(() => setNewsSummaryLoading(false)); }}><MdFlashOn /> <span>{newsSummaryLoading ? "Working…" : "Summary"}</span></button></div></div>{newsSummary && <div className="news-summary">{cleanSummaryText(newsSummary)}</div>}{newsSummaryError && <p className="muted">{newsSummaryError}</p>}{newsLoading ? <p>Loading current headlines…</p> : <div className="news-list">{news.map(item => <article className="news-item" key={item.url}><a href={item.url} target="_blank" rel="noreferrer"><h3>{item.title}</h3></a><small>{item.source} · {item.publishedAt ? new Date(item.publishedAt).toLocaleString() : "Recent"}</small></article>)}{!news.length && <p>No current Kwara State headlines available.</p>}</div>}</section>}

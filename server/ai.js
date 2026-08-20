@@ -20,6 +20,40 @@ function summarizeNewsLocally(articles = []) {
 }
 
 function analyzeContextLocally(context = {}) {
+  if (context.analysisMode === 'PRE_ELECTION') {
+    const dataset = context.selectedDataset || {};
+    const result = context.historicalResult || {};
+    const previousDataset = context.previousDataset || null;
+    const previousResult = context.previousResult || null;
+    const parties = Array.isArray(result.parties) ? result.parties : [];
+    const ranked = parties.slice().sort((a, b) => Number(b.value || 0) - Number(a.value || 0));
+    const leader = ranked[0];
+    const runnerUp = ranked[1];
+    const unit = result.metric === 'votes' ? 'votes' : result.metric === 'seats' ? 'seats' : 'recorded wins';
+    const margin = leader && runnerUp ? Number(leader.value || 0) - Number(runnerUp.value || 0) : null;
+    const previousLeader = previousResult?.parties?.slice().sort((a, b) => Number(b.value || 0) - Number(a.value || 0))[0];
+    return `EXECUTIVE ASSESSMENT
+The ${dataset.year || ''} Kwara ${dataset.election || 'election'} record shows ${leader ? `${leader.party} with ${Number(leader.value || 0).toLocaleString()} ${unit}` : 'no comparable party total'}. This is a historical baseline, not a prediction of the next election.
+
+EVIDENCE & PATTERNS
+- Coverage level: ${dataset.level || 'not stated'}.
+- ${leader && runnerUp ? `${leader.party} led the available record by ${Number(margin).toLocaleString()} ${unit} over ${runnerUp.party}.` : 'The available record supports outcome identification but not a numerical margin.'}
+- ${previousDataset && previousLeader ? `The closest earlier ${previousDataset.election} record is ${previousDataset.year}, led by ${previousLeader.party}; differences must be interpreted against changes in parties, candidates, turnout and polling-unit structure.` : 'No directly comparable earlier dataset is loaded for this selection.'}
+
+RISKS & UNCERTAINTIES
+- Missing data: ${dataset.missing || 'not documented'}.
+- ${result.note || 'Source coverage should be verified before use.'}
+- Historical performance alone cannot establish future voting behaviour or a certain winner.
+
+ACTIONABLE NEXT STEPS
+- Reconcile the data register against the linked official result source before publishing any figure.
+- Obtain the missing geographic or candidate totals listed in the coverage register when they become available.
+- Compare like-for-like offices and geographic levels; do not combine presidential, governorship and legislative votes into one forecast.
+- Use the baseline for neutral planning, reporting coverage and resource readiness, not voter targeting or persuasion.
+
+CONFIDENCE
+${dataset.status === 'available' ? 'MODERATE: the loaded figures support descriptive historical analysis, but the stated geographic and source limitations remain.' : 'LOW TO MODERATE: the record is partial and should support only the specifically listed outcome or seat observations.'}`;
+  }
   if (context.analysisMode === 'POST_ELECTION') {
     const evidence = context.evidenceAndLitigation || {};
     const spatial = Array.isArray(context.spatialConcentrations) ? context.spatialConcentrations : [];
