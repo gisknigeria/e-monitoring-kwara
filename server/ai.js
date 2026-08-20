@@ -20,6 +20,37 @@ function summarizeNewsLocally(articles = []) {
 }
 
 function analyzeContextLocally(context = {}) {
+  if (context.analysisMode === 'POST_ELECTION') {
+    const evidence = context.evidenceAndLitigation || {};
+    const spatial = Array.isArray(context.spatialConcentrations) ? context.spatialConcentrations : [];
+    const performance = Array.isArray(context.reportingPerformance) ? context.reportingPerformance : [];
+    const topSpatial = spatial[0];
+    const topPerformer = performance[0];
+    const conflicts = Number(evidence.fieldMismatches || 0) + Number(evidence.irevMismatches || 0);
+    const readiness = Number(evidence.readinessScore || 0);
+    return `EXECUTIVE ASSESSMENT
+Evidence readiness is ${readiness}%. The submitted record contains ${conflicts} count conflict${conflicts === 1 ? '' : 's'} requiring reconciliation before legal or public reliance. This is an operational evidence assessment, not a legal conclusion.
+
+EVIDENCE & PATTERNS
+- ${Number(evidence.missingEvidence || 0)} field result submission${Number(evidence.missingEvidence || 0) === 1 ? '' : 's'} lack attached evidence.
+- ${Number(evidence.fieldMismatches || 0)} Agent-Supervisor and ${Number(evidence.irevMismatches || 0)} field-IReV discrepancies are recorded.
+- ${topSpatial ? `${topSpatial.ward} has the highest observed submitted-vote concentration (${Number(topSpatial.submittedVotes || 0).toLocaleString()}) with ${Number(topSpatial.incidents || 0)} related operational incidents.` : 'No ward-level spatial concentration can yet be established.'}
+
+RISKS & UNCERTAINTIES
+- Preserve original result images, timestamps, submitter identity, and revision history before correcting records.
+- Submitted vote concentration is not verified turnout and incomplete coverage can change every ranking.
+- Performance scores measure reporting discipline from available records, not overall staff conduct or legal responsibility.
+
+ACTIONABLE NEXT STEPS
+- Freeze the evidence register immediately and verify hashes or immutable copies for every available result attachment.
+- Reconcile the results desk urgently against original sheets for all ${conflicts} conflicting unit record${conflicts === 1 ? '' : 's'}.
+- Recover missing evidence this cycle for ${Number(evidence.missingEvidence || 0)} submission${Number(evidence.missingEvidence || 0) === 1 ? '' : 's'} and document every unavailable original.
+- Review ward deployment before the next cycle using incident burden, reporting gaps, and response outcomes rather than voter targeting.
+- Validate performance awards after supervisor review${topPerformer ? `, beginning with ${topPerformer.name} (${Number(topPerformer.score || 0)}% reporting score)` : ''}.
+
+CONFIDENCE
+${readiness >= 80 ? 'MODERATE: evidence completeness is comparatively strong, but all conflicts and coverage gaps still require verification.' : 'LOW TO MODERATE: missing evidence, count conflicts, or incomplete coverage limit reliance on the current record.'}`;
+  }
   const incidents = Array.isArray(context.incidents) ? context.incidents : [];
   const projection = context.projection || {};
   const resultSummary = context.resultSummary || {};
@@ -28,8 +59,8 @@ function analyzeContextLocally(context = {}) {
   const criticalItems = incidents.filter((incident) => incident?.severity === 'Critical' || incident?.reportType === 'SOS-Emergency');
   const openItems = incidents.filter((incident) => !['Resolved', 'Submitted'].includes(incident?.status));
   const withoutEvidence = openItems.filter((incident) => !Number(incident?.mediaCount));
-  const coverage = Number(projection.coverage || resultSummary.submissions || 0);
-  const leader = projection.leader || 'No party';
+  const coverage = Number(projection.coverage || resultSummary.submissions || context.coverage || 0);
+  const leader = projection.leader || context.leader || 'No party';
   const margin = Number(projection.margin || 0);
   const locationCounts = criticalItems.reduce((counts, incident) => {
     const location = [incident?.lga, incident?.ward].filter(Boolean).join(' / ') || 'unspecified locations';

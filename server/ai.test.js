@@ -24,3 +24,16 @@ test('analyzeContextLocally highlights critical issues and confidence', () => {
   assert.match(analysis, /Critical|SOS|coverage/i);
   assert.match(analysis, /Party A/i);
 });
+
+test('analyzeContextLocally produces a post-election evidence brief', () => {
+  const analysis = analyzeContextLocally({
+    analysisMode: 'POST_ELECTION',
+    evidenceAndLitigation: { readinessScore: 68, missingEvidence: 3, fieldMismatches: 2, irevMismatches: 1 },
+    spatialConcentrations: [{ ward: 'Ilorin West / Adewole', submittedVotes: 1200, incidents: 2 }],
+    reportingPerformance: [{ name: 'Field Agent A', score: 88 }],
+  });
+
+  assert.match(analysis, /Evidence readiness is 68%/i);
+  assert.match(analysis, /Ilorin West \/ Adewole/i);
+  assert.match(analysis, /not a legal conclusion/i);
+});

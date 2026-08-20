@@ -1,5 +1,6 @@
 import { useMemo, useState } from "react";
 import { FaTimes, FaCheckCircle, FaClipboardList, FaUserCheck } from "react-icons/fa";
+import { getRegistrationLocationOptions } from "../../../shared/electionData.js";
 
 export default function SupervisorIncidentListModal({
   incidents = [],
@@ -17,15 +18,20 @@ export default function SupervisorIncidentListModal({
   const [assignedUserId, setAssignedUserId] = useState("");
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
+  const scopeLabel = useMemo(() => {
+    const assigned = String(currentUser?.ward || "").split(",").map((ward) => ward.trim()).filter(Boolean);
+    const lgaWards = getRegistrationLocationOptions(currentUser?.state, currentUser?.lga).wards || [];
+    const assignedKeys = new Set(assigned.map((ward) => ward.toLowerCase()));
+    const wholeLga = lgaWards.length > 0 && lgaWards.every((ward) => assignedKeys.has(ward.toLowerCase()));
+    if (wholeLga) return `${currentUser?.lga} LGA`;
+    return assigned.join(" • ") || currentUser?.lga || "Your Assigned Area";
+  }, [currentUser]);
 
-  // Filter incidents to only those in supervisor's ward
+  // The API already returns the supervisor's assigned ward(s), plus anything
+  // directly assigned to them. Keep that server-authoritative scope here.
   const wardIncidents = useMemo(() => {
-    return incidents.filter(
-      (incident) =>
-        incident.ward &&
-        incident.ward.toLowerCase() === (currentUser?.ward || "").toLowerCase()
-    );
-  }, [incidents, currentUser]);
+    return incidents;
+  }, [incidents]);
 
   // Apply status and assignment filters
   const filteredIncidents = useMemo(() => {
@@ -126,7 +132,7 @@ export default function SupervisorIncidentListModal({
     <div className="modal-backdrop">
       <div className="modal supervisor-incidents-modal" style={{ maxWidth: "900px", maxHeight: "90vh", overflow: "hidden", display: "flex", flexDirection: "column" }}>
         <div className="modal-header">
-          <h2>Incidents in {currentUser?.ward || "Your Ward"}</h2>
+          <h2>Incidents in {scopeLabel}</h2>
           <button className="icon-btn" onClick={onClose}>
             <FaTimes />
           </button>
