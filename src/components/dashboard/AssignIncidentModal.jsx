@@ -115,11 +115,16 @@ export default function AssignIncidentModal({
           <div className="incident-preview">
             <p className="incident-type">{incident?.reportType || "Incident"}</p>
             <p className="incident-title">{incident?.title || "Untitled"}</p>
-            <p className="incident-location">
-              {incident?.lga && incident?.ward
-                ? `${incident.lga}, ${incident.ward}`
-                : incident?.lga || "Unknown location"}
-            </p>
+            <p className="incident-location">{incident?.location?.displayName || incident?.location?.label || (Number.isFinite(Number(incident?.lat)) && Number.isFinite(Number(incident?.lng)) ? `${Number(incident.lat).toFixed(6)}, ${Number(incident.lng).toFixed(6)}` : "Unknown location")}</p>
+            <div className="incident-assignment-summary">
+              <span><b>State</b>{incident?.state || "Kwara"}</span>
+              <span><b>LGA</b>{incident?.lga || "Not supplied"}</span>
+              <span><b>Ward</b>{incident?.ward || "Not supplied"}</span>
+              <span><b>Polling Unit</b>{incident?.pollingUnit || "Not supplied"}</span>
+              <span><b>Severity</b>{incident?.severity || "Unknown"}</span>
+              <span><b>Status</b>{incident?.status || "Open"}</span>
+            </div>
+            <p className="incident-assignment-description">{incident?.description || "No incident description supplied."}</p>
           </div>
 
           <form onSubmit={handleAssign}>

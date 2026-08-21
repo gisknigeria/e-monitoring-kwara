@@ -5,6 +5,7 @@ export default function IncidentNotificationModal({
   notification,
   incident,
   currentUser,
+  users = [],
   onClose,
   onMarkDone,
   onOpenChat,
@@ -16,7 +17,9 @@ export default function IncidentNotificationModal({
     setError("");
     setIsMarking(true);
     try {
-      await onMarkDone(incident.id);
+      const incidentId = incident?.id || notification?.incidentId;
+      if (!incidentId) throw new Error("Incident details are still loading. Please try again.");
+      await onMarkDone(incidentId);
       // Optionally close after marking done
     } catch (err) {
       setError(err.message || "Failed to mark as done. Please try again.");
@@ -28,7 +31,9 @@ export default function IncidentNotificationModal({
   const handleOpenChat = async () => {
     setError("");
     try {
-      await onOpenChat(incident.id);
+      const incidentId = incident?.id || notification?.incidentId;
+      if (!incidentId) throw new Error("Incident details are still loading. Please try again.");
+      await onOpenChat(incidentId);
     } catch (err) {
       setError(err.message || "Failed to open chat. Please try again.");
     }
@@ -36,6 +41,12 @@ export default function IncidentNotificationModal({
 
   const mediaItems = incident?.media || [];
   const hasMedia = mediaItems.length > 0;
+  const reporter = users.find((user) => user.id === incident?.createdBy);
+  const assignee = users.find((user) => user.id === incident?.assignedTo);
+  const coordinateText = Number.isFinite(Number(incident?.lat)) && Number.isFinite(Number(incident?.lng))
+    ? `${Number(incident.lat).toFixed(6)}, ${Number(incident.lng).toFixed(6)}`
+    : "Not available";
+  const detectedLocation = incident?.location?.displayName || incident?.location?.label || "Not available";
 
   const getMediaIcon = (type) => {
     if (type?.startsWith("image")) return <FaImage />;
@@ -97,27 +108,17 @@ export default function IncidentNotificationModal({
               <div className="detail-row">
                 <span className="detail-label">Description:</span>
                 <span className="detail-value detail-description">
-                  {incident?.description}
+                  {incident?.description || "No description supplied."}
                 </span>
               </div>
-              {incident?.lga && (
-                <div className="detail-row">
-                  <span className="detail-label">LG:</span>
-                  <span className="detail-value">{incident.lga}</span>
-                </div>
-              )}
-              {incident?.ward && (
-                <div className="detail-row">
-                  <span className="detail-label">Ward:</span>
-                  <span className="detail-value">{incident.ward}</span>
-                </div>
-              )}
-              {incident?.pollingUnit && (
-                <div className="detail-row">
-                  <span className="detail-label">Polling Unit:</span>
-                  <span className="detail-value">{incident.pollingUnit}</span>
-                </div>
-              )}
+              <div className="detail-row"><span className="detail-label">Detected location:</span><span className="detail-value">{detectedLocation}</span></div>
+              <div className="detail-row"><span className="detail-label">State:</span><span className="detail-value">{incident?.state || currentUser?.state || "Kwara"}</span></div>
+              <div className="detail-row"><span className="detail-label">LGA:</span><span className="detail-value">{incident?.lga || "Not supplied"}</span></div>
+              <div className="detail-row"><span className="detail-label">Ward:</span><span className="detail-value">{incident?.ward || "Not supplied"}</span></div>
+              <div className="detail-row"><span className="detail-label">Polling Unit:</span><span className="detail-value">{incident?.pollingUnit || "Not supplied"}</span></div>
+              <div className="detail-row"><span className="detail-label">Coordinates:</span><span className="detail-value">{coordinateText}</span></div>
+              <div className="detail-row"><span className="detail-label">Reported by:</span><span className="detail-value">{reporter?.name || (incident?.createdBy === currentUser?.id ? currentUser?.name : incident?.createdBy) || "Unknown"}</span></div>
+              <div className="detail-row"><span className="detail-label">Assigned to:</span><span className="detail-value">{assignee?.name || (incident?.assignedTo === currentUser?.id ? currentUser?.name : incident?.assignedTo) || "Unassigned"}</span></div>
               <div className="detail-row">
                 <span className="detail-label">Status:</span>
                 <span className="detail-value">{incident?.status || "Open"}</span>
@@ -167,7 +168,7 @@ export default function IncidentNotificationModal({
           <button
             type="button"
             onClick={handleOpenChat}
-            disabled={error ? false : false}
+            disabled={!incident?.id && !notification?.incidentId}
             className="btn-secondary"
             title="Open persistent chat with admin"
           >

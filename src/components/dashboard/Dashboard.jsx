@@ -3037,6 +3037,7 @@ function Dashboard({ session, onLogout, onSessionUpdate }) {
   const canSeeReport = (item) =>
     canAdmin ||
     (isSupervisor && (item.assignedTo === session.user.id || isSupervisorWardRelevant(item))) ||
+    item.assignedTo === session.user.id ||
     item.createdBy === session.user.id ||
     (item.visibleTo || []).includes(session.user.id);
   const flushOfflineVideoQueue = async () => {
@@ -3588,10 +3589,26 @@ function Dashboard({ session, onLogout, onSessionUpdate }) {
       else setNotice("This admin chat is no longer available");
       return;
     }
-    const incident = incidents.find((item) => item.id === notification.incidentId) || selectedIncident;
+    let incident = incidents.find((item) => item.id === notification.incidentId)
+      || (selectedIncident?.id === notification.incidentId ? selectedIncident : null);
+    if (!incident && notification.incidentId) {
+      try {
+        incident = await request(`/incidents/${notification.incidentId}`, session.token);
+        setIncidents((old) => old.some((item) => item.id === incident.id)
+          ? old.map((item) => item.id === incident.id ? incident : item)
+          : [incident, ...old]);
+      } catch {
+        incident = null;
+      }
+    }
     setSelectedIncident(incident || null);
     setSelectedNotification(notification);
     setNotificationModalOpen(true);
+    if (incident && Number.isFinite(Number(incident.lat)) && Number.isFinite(Number(incident.lng))) {
+      request(`/location/reverse?lat=${encodeURIComponent(incident.lat)}&lng=${encodeURIComponent(incident.lng)}`, session.token)
+        .then((location) => setSelectedIncident((current) => current?.id === incident.id ? { ...current, location } : current))
+        .catch(() => {});
+    }
     markRead();
   };
   const handleNotificationDone = async (incidentId) => {
@@ -3613,7 +3630,13 @@ function Dashboard({ session, onLogout, onSessionUpdate }) {
     setSelectedIncident(null);
   };
   const handleOpenNotificationChat = async (incidentId) => {
-    const incident = incidents.find((item) => item.id === incidentId) || selectedIncident;
+    if (!incidentId) throw new Error("Incident details are still loading. Please close this alert and try again.");
+    let incident = incidents.find((item) => item.id === incidentId)
+      || (selectedIncident?.id === incidentId ? selectedIncident : null);
+    if (!incident) {
+      incident = await request(`/incidents/${incidentId}`, session.token);
+      setIncidents((old) => old.some((item) => item.id === incident.id) ? old : [incident, ...old]);
+    }
     if (!incident) throw new Error("Incident not found");
     setNotificationModalOpen(false);
     await openIncidentChat(incident);
@@ -6367,6 +6390,7 @@ function Dashboard({ session, onLogout, onSessionUpdate }) {
           messages={chatMessages}
           users={users}
           currentUser={session.user}
+          users={users}
           isAdmin={canManagePersonnel}
           onClose={() => setChatPanel(false)}
           onCreateRoom={createChatRoom}

@@ -181,6 +181,7 @@ export default function CameraPanel({
 }) {
   const [recordAll, setRecordAll] = useState(false);
   const [sharingFeedId, setSharingFeedId] = useState(null);
+  const [preparedShares, setPreparedShares] = useState({});
   const recordersRef = useRef({});
   const requestedFeedsRef = useRef(new Set());
   const [form, setForm] = useState({
@@ -286,20 +287,43 @@ export default function CameraPanel({
       const extension = type.includes("mp4") ? "mp4" : "webm";
       const unit = String(feed.pollingUnit || feed.station || "live-feed").replace(/[^a-z0-9_-]+/gi, "-");
       const file = new File(chunks, `${unit}_${new Date().toISOString().replace(/[:.]/g, "-")}.${extension}`, { type });
-      if (navigator.canShare?.({ files: [file] })) {
-        await navigator.share({ title: "Election monitoring live feed", text: `${feed.name || "Field agent"} — ${feed.location?.label || feed.pollingUnit || "Polling unit"}`, files: [file] });
+      setPreparedShares((current) => ({
+        ...current,
+        [feed.userId]: {
+          file,
+          title: "Election monitoring live feed",
+          text: `${feed.name || "Field agent"} — ${feed.location?.label || feed.pollingUnit || "Polling unit"}`,
+        },
+      }));
+    } catch (error) {
+      if (error.name !== "AbortError") alert(error.message || "Unable to prepare this feed");
+    } finally {
+      setSharingFeedId(null);
+    }
+  };
+
+  const sharePreparedFeedVideo = async (feed) => {
+    const prepared = preparedShares[feed.userId];
+    if (!prepared) return shareFeedVideo(feed);
+    const shareData = { title: prepared.title, text: prepared.text, files: [prepared.file] };
+    try {
+      if (navigator.share && (!navigator.canShare || navigator.canShare(shareData))) {
+        await navigator.share(shareData);
       } else {
         const link = document.createElement("a");
-        link.href = URL.createObjectURL(file);
-        link.download = file.name;
+        link.href = URL.createObjectURL(prepared.file);
+        link.download = prepared.file.name;
         link.click();
         setTimeout(() => URL.revokeObjectURL(link.href), 1000);
         alert("The video was downloaded. You can attach it to your social media post.");
       }
+      setPreparedShares((current) => {
+        const next = { ...current };
+        delete next[feed.userId];
+        return next;
+      });
     } catch (error) {
       if (error.name !== "AbortError") alert(error.message || "Unable to share this feed");
-    } finally {
-      setSharingFeedId(null);
     }
   };
 
@@ -418,8 +442,8 @@ export default function CameraPanel({
                 {feed.lat && (
                   <button onClick={() => onShowMap(feed)}>Show on map</button>
                 )}
-                <button disabled={sharingFeedId === feed.userId} onClick={() => shareFeedVideo(feed)}>
-                  {sharingFeedId === feed.userId ? "Recording 10s…" : "Share video"}
+                <button className={preparedShares[feed.userId] ? "share-ready" : ""} disabled={sharingFeedId === feed.userId} onClick={() => preparedShares[feed.userId] ? sharePreparedFeedVideo(feed) : shareFeedVideo(feed)}>
+                  {sharingFeedId === feed.userId ? "Recording 10s…" : preparedShares[feed.userId] ? "Share ready" : "Prepare video"}
                 </button>
               </div>
               <div className="agent-feed-hover">

@@ -181,6 +181,7 @@
 }
 
 /* Incident Assign Modal */
+.incident-assignment-summary{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px;margin-top:10px}.incident-assignment-summary span{display:grid;gap:3px;padding:8px;border:1px solid #2f7a43;border-radius:7px;background:#0d2818;color:#dcfce7!important}.incident-assignment-summary b{color:#86efac!important;font-size:8px!important;text-transform:uppercase}.incident-assignment-description{margin:10px 0 0;padding:9px;border-left:3px solid #38bdf8;background:#0b2532;color:#dbeafe!important;line-height:1.5}@media(max-width:600px){.incident-assignment-summary{grid-template-columns:1fr}}
 .incident-assign-modal {
   max-width: 500px;
   max-height: 88vh;

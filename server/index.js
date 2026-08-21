@@ -1818,6 +1818,11 @@ app.post('/api/results', auth, rateLimit, asyncRoute(async (req, res) => {
   res.status(201).json(created);
 }));
 app.get('/api/incidents', auth, rateLimit, asyncRoute(async (req, res) => res.json((await store.incidents()).filter(incident => canAccessIncident(req.user, incident)))));
+app.get('/api/incidents/:id', auth, rateLimit, asyncRoute(async (req, res) => {
+  const incident = (await store.incidents()).find(item => item.id === req.params.id);
+  if (!incident || !canAccessIncident(req.user, incident)) return res.status(404).json({ message: 'Incident not found' });
+  res.json(incident);
+}));
 app.post('/api/incidents', auth, rateLimit, asyncRoute(async (req, res) => {
   const media = Array.isArray(req.body.media) ? req.body.media.slice(0, 6) : [];
   const mediaValidation = validateMediaPayload(media);
