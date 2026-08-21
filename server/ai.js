@@ -21,38 +21,53 @@ function summarizeNewsLocally(articles = []) {
 
 function analyzeContextLocally(context = {}) {
   if (context.analysisMode === 'PRE_ELECTION') {
-    const dataset = context.selectedDataset || {};
-    const result = context.historicalResult || {};
-    const previousDataset = context.previousDataset || null;
-    const previousResult = context.previousResult || null;
-    const parties = Array.isArray(result.parties) ? result.parties : [];
-    const ranked = parties.slice().sort((a, b) => Number(b.value || 0) - Number(a.value || 0));
-    const leader = ranked[0];
-    const runnerUp = ranked[1];
-    const unit = result.metric === 'votes' ? 'votes' : result.metric === 'seats' ? 'seats' : 'recorded wins';
-    const margin = leader && runnerUp ? Number(leader.value || 0) - Number(runnerUp.value || 0) : null;
-    const previousLeader = previousResult?.parties?.slice().sort((a, b) => Number(b.value || 0) - Number(a.value || 0))[0];
+    const history = Array.isArray(context.historicalDatasets) ? context.historicalDatasets : [];
+    const byId = new Map(history.map(item => [item?.dataset?.id, item]));
+    const resultFor = id => byId.get(id)?.result || {};
+    const partyValue = (result, party) => Number((result?.parties || []).find(item => item.party === party)?.value || 0);
+    const change = (current, previous) => {
+      const delta = Number(current || 0) - Number(previous || 0);
+      return `${delta >= 0 ? '+' : ''}${delta.toLocaleString()}`;
+    };
+    const governor2019 = resultFor('2019-governor');
+    const governor2023 = resultFor('2023-governor');
+    const president2019 = resultFor('2019-president');
+    const president2023 = resultFor('2023-president');
+    const assembly2019 = resultFor('2019-assembly');
+    const assembly2023 = resultFor('2023-assembly');
+    const governorLgas = Array.isArray(governor2023.areas) ? governor2023.areas : [];
+    const presidentialLgas = Array.isArray(president2023.areas) ? president2023.areas : [];
+    const ready = history.filter(item => item?.dataset?.status === 'available').length;
+    const partial = Math.max(0, history.length - ready);
+    const apcGovernorChange = change(partyValue(governor2023, 'APC'), partyValue(governor2019, 'APC'));
+    const pdpGovernorChange = change(partyValue(governor2023, 'PDP'), partyValue(governor2019, 'PDP'));
+    const apcPresidentialChange = change(partyValue(president2023, 'APC'), partyValue(president2019, 'APC'));
+    const pdpPresidentialChange = change(partyValue(president2023, 'PDP'), partyValue(president2019, 'PDP'));
+    const apcAssembly2019 = partyValue(assembly2019, 'APC');
+    const apcAssembly2023 = partyValue(assembly2023, 'APC');
+    const pdpAssembly2023 = partyValue(assembly2023, 'PDP');
     return `EXECUTIVE ASSESSMENT
-The ${dataset.year || ''} Kwara ${dataset.election || 'election'} record shows ${leader ? `${leader.party} with ${Number(leader.value || 0).toLocaleString()} ${unit}` : 'no comparable party total'}. This is a historical baseline, not a prediction of the next election.
+Across all ${history.length} loaded Kwara datasets, the historical record shows broad APC dominance in the available 2019, 2023 and 2024 outcomes, while PDP improved its governorship vote between 2019 and 2023 and gained one State Assembly seat in 2023. Kwara State has exactly 16 LGAs. This is a statewide historical baseline, not a prediction of the next election.
 
 EVIDENCE & PATTERNS
-- Coverage level: ${dataset.level || 'not stated'}.
-- ${leader && runnerUp ? `${leader.party} led the available record by ${Number(margin).toLocaleString()} ${unit} over ${runnerUp.party}.` : 'The available record supports outcome identification but not a numerical margin.'}
-- ${previousDataset && previousLeader ? `The closest earlier ${previousDataset.election} record is ${previousDataset.year}, led by ${previousLeader.party}; differences must be interpreted against changes in parties, candidates, turnout and polling-unit structure.` : 'No directly comparable earlier dataset is loaded for this selection.'}
+- Governorship: APC changed by ${apcGovernorChange} votes from 2019 to 2023; PDP changed by ${pdpGovernorChange}. The 2023 transcription lists APC ahead in ${governorLgas.length} of 16 LGAs, but those LGA figures do not yet reconcile to the declared state total.
+- Presidential: APC changed by ${apcPresidentialChange} and PDP by ${pdpPresidentialChange} votes between the available 2019 and 2023 records. The 2019 presidential record is partial, so other-party movement is not comparable.
+- Legislative: the loaded records show APC winning all 3 Senate districts and 6 federal constituencies in both cycles; 2023 vote totals are missing. APC State Assembly seats changed from ${apcAssembly2019} to ${apcAssembly2023}, while PDP recorded ${pdpAssembly2023} seat in 2023.
+- The 2024 local-government record contains 16 chairmanship and 193 councillorship outcomes, but no detailed party vote totals.
 
 RISKS & UNCERTAINTIES
-- Missing data: ${dataset.missing || 'not documented'}.
-- ${result.note || 'Source coverage should be verified before use.'}
-- Historical performance alone cannot establish future voting behaviour or a certain winner.
+- ${partial} of ${history.length} datasets are partial, especially 2023 Senate/Reps votes and Assembly/local-government constituency totals.
+- Polling-unit structures changed between election cycles, and the two 2023 LGA transcriptions must not be presented as certified state totals.
+- Historical outcomes cannot establish future voting behaviour or a certain winner.
 
 ACTIONABLE NEXT STEPS
-- Reconcile the data register against the linked official result source before publishing any figure.
-- Obtain the missing geographic or candidate totals listed in the coverage register when they become available.
-- Compare like-for-like offices and geographic levels; do not combine presidential, governorship and legislative votes into one forecast.
-- Use the baseline for neutral planning, reporting coverage and resource readiness, not voter targeting or persuasion.
+- Direct the data team now to reconcile all 16 LGA transcriptions against official result sheets and record every correction.
+- Require the planning team this cycle to compare only like-for-like offices across 2019 and 2023.
+- Allocate reporting and verification readiness across all 16 LGAs using result-sheet coverage and operational gaps, not voter persuasion.
+- Obtain official 2023 legislative vote totals and detailed 2024 KWSIEC figures before producing constituency-level conclusions.
 
 CONFIDENCE
-${dataset.status === 'available' ? 'MODERATE: the loaded figures support descriptive historical analysis, but the stated geographic and source limitations remain.' : 'LOW TO MODERATE: the record is partial and should support only the specifically listed outcome or seat observations.'}`;
+MODERATE for statewide historical direction; LOW TO MODERATE for constituency or polling-unit decisions because ${partial} datasets remain partial and require source reconciliation.`;
   }
   if (context.analysisMode === 'POST_ELECTION') {
     const evidence = context.evidenceAndLitigation || {};
@@ -126,4 +141,12 @@ ${readiness >= 80 ? 'MODERATE: evidence completeness is comparatively strong, bu
   return `EXECUTIVE ASSESSMENT\n${assessment}\n\nEVIDENCE & PATTERNS\n${evidence.join('\n')}\n\nRISKS & UNCERTAINTIES\n${risks.join('\n')}\n\nACTIONABLE NEXT STEPS\n${nextActions.join('\n')}\n\nCONFIDENCE\n${confidence}`;
 }
 
-export { summarizeNewsLocally, analyzeContextLocally };
+function enforceKwaraPreElectionFacts(value, analysisMode = 'PRE_ELECTION') {
+  const text = String(value || '');
+  if (analysisMode !== 'PRE_ELECTION') return text;
+  return text
+    .replace(/\b18\s+LGAs\b/gi, '16 LGAs')
+    .replace(/\b18\s+local government areas\b/gi, '16 Local Government Areas');
+}
+
+export { summarizeNewsLocally, analyzeContextLocally, enforceKwaraPreElectionFacts };

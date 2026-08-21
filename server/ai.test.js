@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { analyzeContextLocally, summarizeNewsLocally } from './ai.js';
+import { analyzeContextLocally, enforceKwaraPreElectionFacts, summarizeNewsLocally } from './ai.js';
 
 test('summarizeNewsLocally produces a useful summary from headlines', () => {
   const summary = summarizeNewsLocally([
@@ -38,14 +38,26 @@ test('analyzeContextLocally produces a post-election evidence brief', () => {
   assert.match(analysis, /not a legal conclusion/i);
 });
 
-test('analyzeContextLocally produces a coverage-aware pre-election brief', () => {
+test('analyzeContextLocally uses the complete history for a Kwara-wide pre-election brief', () => {
   const analysis = analyzeContextLocally({
     analysisMode: 'PRE_ELECTION',
-    selectedDataset: { year: 2023, election: 'Senate', level: '3 districts', status: 'partial', missing: 'Candidate vote totals' },
-    historicalResult: { metric: 'wins', parties: [{ party: 'APC', value: 3 }], note: 'Winner-only record.' },
+    selectedView: { dataset: { id: '2023-senate' }, result: { metric: 'wins', parties: [{ party: 'APC', value: 3 }] } },
+    historicalDatasets: [
+      { dataset: { id: '2019-governor', status: 'available' }, result: { parties: [{ party: 'APC', value: 331546 }, { party: 'PDP', value: 114754 }] } },
+      { dataset: { id: '2023-governor', status: 'available' }, result: { parties: [{ party: 'APC', value: 273424 }, { party: 'PDP', value: 155490 }], areas: Array.from({ length: 16 }, (_, index) => ({ name: `LGA ${index + 1}`, winner: 'APC' })) } },
+      { dataset: { id: '2019-assembly', status: 'partial' }, result: { parties: [{ party: 'APC', value: 24 }] } },
+      { dataset: { id: '2023-assembly', status: 'partial' }, result: { parties: [{ party: 'APC', value: 23 }, { party: 'PDP', value: 1 }] } },
+    ],
   });
 
   assert.match(analysis, /historical baseline, not a prediction/i);
-  assert.match(analysis, /Candidate vote totals/i);
-  assert.match(analysis, /partial/i);
+  assert.match(analysis, /exactly 16 LGAs/i);
+  assert.match(analysis, /Governorship: APC changed/i);
+  assert.match(analysis, /PDP recorded 1 seat/i);
+  assert.doesNotMatch(analysis, /18 LGAs/i);
+});
+
+test('enforceKwaraPreElectionFacts corrects the known 18-LGA hallucination', () => {
+  const corrected = enforceKwaraPreElectionFacts('Kwara has 18 LGAs and 18 local government areas.', 'PRE_ELECTION');
+  assert.equal(corrected, 'Kwara has 16 LGAs and 16 Local Government Areas.');
 });
