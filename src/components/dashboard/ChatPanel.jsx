@@ -123,6 +123,25 @@ export default function ChatPanel({
       </div>
       <div className="chat-layout">
         <aside className="chat-rooms">
+          <label className="chat-room-selector-label" htmlFor="chat-room-selector">
+            Chat room
+          </label>
+          <select
+            id="chat-room-selector"
+            className="chat-room-selector"
+            value={activeRoom?.id || ""}
+            onChange={(e) => {
+              const room = rooms.find((item) => item.id === e.target.value);
+              if (room) onSelectRoom(room);
+            }}
+          >
+            <option value="">Select a room</option>
+            {rooms.map((room) => (
+              <option key={room.id} value={room.id}>
+                {room.name}
+              </option>
+            ))}
+          </select>
           {rooms.map((room) => (
             <button
               key={room.id}
