@@ -43,7 +43,9 @@ export default function PreElectionAnalysis({ onAnalyze }) {
         })),
         objective: 'Use every loaded dataset to produce a statewide historical assessment and neutral operational decisions. Compare like-for-like offices across years. Do not base the brief only on selectedView, predict a certain winner, target voters, or recommend political persuasion.',
       });
-      setBrief(response.analysis || 'No historical brief was returned.');
+      const analysis = String(response.analysis || '').trim();
+      if (!analysis) throw new Error('The analysis service returned an empty brief. Please try again.');
+      setBrief(analysis);
     } catch (analysisError) { setError(analysisError.message || 'Historical analysis is unavailable.'); }
     finally { setLoading(false); }
   };

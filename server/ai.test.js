@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { analyzeContextLocally, enforceKwaraPreElectionFacts, summarizeNewsLocally } from './ai.js';
+import { analyzeContextLocally, enforceKwaraPreElectionFacts, ensureUsableAnalysis, summarizeNewsLocally } from './ai.js';
 
 test('summarizeNewsLocally produces a useful summary from headlines', () => {
   const summary = summarizeNewsLocally([
@@ -60,4 +60,11 @@ test('analyzeContextLocally uses the complete history for a Kwara-wide pre-elect
 test('enforceKwaraPreElectionFacts corrects the known 18-LGA hallucination', () => {
   const corrected = enforceKwaraPreElectionFacts('Kwara has 18 LGAs and 18 local government areas.', 'PRE_ELECTION');
   assert.equal(corrected, 'Kwara has 16 LGAs and 16 Local Government Areas.');
+});
+
+test('ensureUsableAnalysis rejects blank or incomplete provider responses', () => {
+  assert.throws(() => ensureUsableAnalysis('', 'Groq'), /empty or incomplete/i);
+  assert.throws(() => ensureUsableAnalysis('   ', 'Gemini'), /empty or incomplete/i);
+  assert.throws(() => ensureUsableAnalysis('Too short', 'OpenAI'), /empty or incomplete/i);
+  assert.match(ensureUsableAnalysis('A complete operational analysis response '.repeat(4), 'local'), /complete operational/);
 });

@@ -149,4 +149,15 @@ function enforceKwaraPreElectionFacts(value, analysisMode = 'PRE_ELECTION') {
     .replace(/\b18\s+local government areas\b/gi, '16 Local Government Areas');
 }
 
-export { summarizeNewsLocally, analyzeContextLocally, enforceKwaraPreElectionFacts };
+function ensureUsableAnalysis(value, provider = 'AI') {
+  const text = String(value || '').trim();
+  if (text.length < 80) {
+    const error = new Error(`${provider} returned an empty or incomplete analysis.`);
+    error.code = 'AI_EMPTY_RESPONSE';
+    error.status = 502;
+    throw error;
+  }
+  return text;
+}
+
+export { summarizeNewsLocally, analyzeContextLocally, enforceKwaraPreElectionFacts, ensureUsableAnalysis };
