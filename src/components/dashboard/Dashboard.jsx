@@ -1811,7 +1811,19 @@ function MapView({
   );
 }
 
-function StreamVideo({ src, stream, muted = false, showControls = true }) {
+const cameraWatermarkLines = (feed = {}) => {
+  const location = feed.location || {};
+  const primary = location.label || (Number.isFinite(Number(feed.lat)) && Number.isFinite(Number(feed.lng)) ? `${Number(feed.lat).toFixed(5)}, ${Number(feed.lng).toFixed(5)}` : "Location awaiting GPS");
+  return [
+    primary,
+    location.street && location.street !== primary ? location.street : "",
+    `Polling Unit: ${feed.pollingUnit || feed.station || "Not assigned"}`,
+    `Ward: ${feed.ward || "Not assigned"}  •  LGA: ${feed.lga || "Not assigned"}`,
+    Number(feed.accuracy) > 0 ? `GPS accuracy ±${Math.round(Number(feed.accuracy))} m` : "",
+  ].filter(Boolean);
+};
+
+function StreamVideo({ src, stream, muted = false, showControls = true, watermark }) {
   const ref = useRef(null);
   const recorderRef = useRef(null);
   const chunksRef = useRef([]);
@@ -1905,6 +1917,7 @@ function StreamVideo({ src, stream, muted = false, showControls = true }) {
   return (
     <div className="recordable-video">
       <video ref={ref} controls={showControls} autoPlay playsInline muted={soundMuted} />
+      {watermark && <div className="video-location-watermark">{cameraWatermarkLines(watermark).map((line, index) => index === 0 ? <strong key={line}>{line}</strong> : <span key={`${line}-${index}`}>{line}</span>)}<small>© OpenStreetMap contributors</small></div>}
       {showControls && (
         <>
           <div className="stream-audio-controls">
@@ -2883,6 +2896,7 @@ function Dashboard({ session, onLogout, onSessionUpdate }) {
   const [cameraPreviewMode, setCameraPreviewMode] = useState(true); // true = show preview, false = background mode
   const [cameraFacingMode, setCameraFacingMode] = useState("environment");
   const [cameraMicMuted, setCameraMicMuted] = useState(false);
+  const [cameraLocation, setCameraLocation] = useState(null);
   const [operationsOpen, setOperationsOpen] = useState(false);
   const [toolsOpen, setToolsOpen] = useState(false);
   const [ipLogOpen, setIpLogOpen] = useState(false);
@@ -3409,7 +3423,9 @@ function Dashboard({ session, onLogout, onSessionUpdate }) {
     socket.on("camera:shares:list", (feeds) => setPhoneShares(feeds));
     socket.on("camera:share:start", (feed) =>
       setPhoneShares((old) =>
-        old.some((x) => x.userId === feed.userId) ? old : [...old, feed],
+        old.some((x) => x.userId === feed.userId)
+          ? old.map((item) => item.userId === feed.userId ? { ...item, ...feed } : item)
+          : [...old, feed],
       ),
     );
     socket.on("camera:share:stop", ({ userId }) => {
@@ -4943,6 +4959,7 @@ function Dashboard({ session, onLogout, onSessionUpdate }) {
       setSharingCamera(false);
       setSelfCameraPreview(false);
       setCameraMicMuted(false);
+      setCameraLocation(null);
       cameraMicMutedRef.current = false;
       releaseWakeLock();
       stopSilentAudio();
@@ -4960,6 +4977,12 @@ function Dashboard({ session, onLogout, onSessionUpdate }) {
       setSelfCameraPreview(cameraPreviewMode);
       acquireWakeLock();
       startSilentAudio();
+      const cameraPoint = gpsBestRef.current || gpsPositions[session.user.id] || session.user;
+      if (Number.isFinite(Number(cameraPoint?.lat)) && Number.isFinite(Number(cameraPoint?.lng))) {
+        request(`/location/reverse?lat=${encodeURIComponent(cameraPoint.lat)}&lng=${encodeURIComponent(cameraPoint.lng)}`, session.token)
+          .then(setCameraLocation)
+          .catch(() => setCameraLocation(null));
+      }
       socketRef.current?.emit("camera:share:start", {
         userId: session.user.id,
         name: session.user.name,
@@ -5962,6 +5985,11 @@ function Dashboard({ session, onLogout, onSessionUpdate }) {
             stream={localCameraStreamRef.current}
             muted={true}
             showControls={false}
+            watermark={{
+              ...session.user,
+              ...(gpsPositions[session.user.id] || gpsBestRef.current || {}),
+              location: cameraLocation,
+            }}
           />
           <div className="self-camera-preview-footer">
             <span>{cameraFacingMode === "environment" ? "Back camera" : "Front camera"}</span>

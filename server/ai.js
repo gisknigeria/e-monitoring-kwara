@@ -37,6 +37,14 @@ function analyzeContextLocally(context = {}) {
     const assembly2023 = resultFor('2023-assembly');
     const governorLgas = Array.isArray(governor2023.areas) ? governor2023.areas : [];
     const presidentialLgas = Array.isArray(president2023.areas) ? president2023.areas : [];
+    const closestGovernorLgas = governorLgas
+      .filter(area => Number.isFinite(Number(area?.winnerValue)) && Number.isFinite(Number(area?.runnerUpValue)))
+      .map(area => ({ name: area.name, winner: area.winner, runnerUp: area.runnerUp, margin: Math.abs(Number(area.winnerValue) - Number(area.runnerUpValue)) }))
+      .sort((a, b) => a.margin - b.margin)
+      .slice(0, 4);
+    const closestGovernorText = closestGovernorLgas.length
+      ? closestGovernorLgas.map(area => `${area.name} (${area.winner} over ${area.runnerUp} by ${area.margin.toLocaleString()})`).join('; ')
+      : 'No complete LGA margins are loaded';
     const ready = history.filter(item => item?.dataset?.status === 'available').length;
     const partial = Math.max(0, history.length - ready);
     const apcGovernorChange = change(partyValue(governor2023, 'APC'), partyValue(governor2019, 'APC'));
@@ -47,10 +55,11 @@ function analyzeContextLocally(context = {}) {
     const apcAssembly2023 = partyValue(assembly2023, 'APC');
     const pdpAssembly2023 = partyValue(assembly2023, 'PDP');
     return `EXECUTIVE ASSESSMENT
-Across all ${history.length} loaded Kwara datasets, the historical record shows broad APC dominance in the available 2019, 2023 and 2024 outcomes, while PDP improved its governorship vote between 2019 and 2023 and gained one State Assembly seat in 2023. Kwara State has exactly 16 LGAs. This is a statewide historical baseline, not a prediction of the next election.
+Across all ${history.length} loaded Kwara datasets, the historical record shows broad APC dominance in the available 2019, 2023 and 2024 outcomes, while PDP improved its governorship vote between 2019 and 2023 and gained one State Assembly seat in 2023. Kwara State has exactly 16 LGAs. This is a statewide historical baseline, not a prediction, and it cannot establish that any party will win a future LGA.
 
 EVIDENCE & PATTERNS
 - Governorship: APC changed by ${apcGovernorChange} votes from 2019 to 2023; PDP changed by ${pdpGovernorChange}. The 2023 transcription lists APC ahead in ${governorLgas.length} of 16 LGAs, but those LGA figures do not yet reconcile to the declared state total.
+- Historical LGA competitiveness: the closest recorded 2023 governorship margins were ${closestGovernorText}. These describe that election only and are not forecasts.
 - Presidential: APC changed by ${apcPresidentialChange} and PDP by ${pdpPresidentialChange} votes between the available 2019 and 2023 records. The 2019 presidential record is partial, so other-party movement is not comparable.
 - Legislative: the loaded records show APC winning all 3 Senate districts and 6 federal constituencies in both cycles; 2023 vote totals are missing. APC State Assembly seats changed from ${apcAssembly2019} to ${apcAssembly2023}, while PDP recorded ${pdpAssembly2023} seat in 2023.
 - The 2024 local-government record contains 16 chairmanship and 193 councillorship outcomes, but no detailed party vote totals.
@@ -62,8 +71,8 @@ RISKS & UNCERTAINTIES
 
 ACTIONABLE NEXT STEPS
 - Direct the data team now to reconcile all 16 LGA transcriptions against official result sheets and record every correction.
-- Require the planning team this cycle to compare only like-for-like offices across 2019 and 2023.
-- Allocate reporting and verification readiness across all 16 LGAs using result-sheet coverage and operational gaps, not voter persuasion.
+- Require the planning and compliance teams this cycle to compare only like-for-like offices across 2019 and 2023 and document every unsupported assumption.
+- Verify complete agent, supervisor, incident-escalation, and result-documentation coverage across all 16 LGAs and 193 wards before deployment is approved.
 - Obtain official 2023 legislative vote totals and detailed 2024 KWSIEC figures before producing constituency-level conclusions.
 
 CONFIDENCE

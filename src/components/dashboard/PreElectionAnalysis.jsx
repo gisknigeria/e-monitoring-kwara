@@ -41,7 +41,7 @@ export default function PreElectionAnalysis({ onAnalyze }) {
           dataset: item,
           result: HISTORICAL_ELECTION_RESULTS[item.id],
         })),
-        objective: 'Use every loaded dataset to produce a statewide historical assessment and neutral operational decisions. Compare like-for-like offices across years. Do not base the brief only on selectedView, predict a certain winner, target voters, or recommend political persuasion.',
+        objective: 'Use every loaded dataset to produce a universal statewide historical assessment. Compare like-for-like offices and parties across years, identify historically strong, weak, and closely contested LGAs wherever the records support that conclusion, and recommend practical work for data quality, field coverage, incident response, compliance, and result documentation. Do not base the brief only on selectedView, present historical competitiveness as a guaranteed future win, target voters, or recommend political persuasion.',
       });
       const analysis = String(response.analysis || '').trim();
       if (!analysis) throw new Error('The analysis service returned an empty brief. Please try again.');
@@ -53,11 +53,11 @@ export default function PreElectionAnalysis({ onAnalyze }) {
   return <section className="pre-election-dashboard">
     <div className="pre-election-head">
       <div><span className="eyebrow">BEFORE THE NEXT ELECTION</span><h2>Pre-Election Historical Analysis</h2><p>Compare previous Kwara outcomes while keeping incomplete records clearly visible.</p></div>
-      <button className="primary action-btn" disabled={loading || !result} onClick={generate}><MdFlashOn /> {loading ? 'Analyzing…' : 'Generate AI Brief'}</button>
+      <button className="primary action-btn" disabled={loading || !result} onClick={generate}><MdFlashOn /> {loading ? 'Analyzing…' : 'Generate Brief'}</button>
     </div>
     <p className="pre-election-caution">Historical results are a baseline, not a forecast. Missing votes remain unavailable and are never converted to zero.</p>
 
-    {(brief || error) && <article className="pre-card pre-ai-brief"><header><div><h3>AI Statewide Historical Brief</h3><p>Uses every loaded Kwara election dataset, regardless of the chart selected below.</p></div></header>{brief && <div>{brief}</div>}{error && <p className="pre-analysis-error">{error}</p>}</article>}
+    {(brief || error) && <article className="pre-card pre-generated-brief"><header><div><h3>Statewide Historical Operations Brief</h3><p>Uses every loaded Kwara election dataset to assess party performance, LGA competitiveness, and operational readiness.</p></div></header>{brief && <div>{brief}</div>}{error && <p className="pre-analysis-error">{error}</p>}</article>}
 
     <div className="pre-filter-card">
       <label><span>Election year</span><select value={year} onChange={(event) => selectYear(event.target.value)}>{years.map((item) => <option key={item}>{item}</option>)}</select></label>

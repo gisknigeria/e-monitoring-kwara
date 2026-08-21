@@ -52,6 +52,8 @@ test('analyzeContextLocally uses the complete history for a Kwara-wide pre-elect
 
   assert.match(analysis, /historical baseline, not a prediction/i);
   assert.match(analysis, /exactly 16 LGAs/i);
+  assert.match(analysis, /Historical LGA competitiveness/i);
+  assert.match(analysis, /not forecasts/i);
   assert.match(analysis, /Governorship: APC changed/i);
   assert.match(analysis, /PDP recorded 1 seat/i);
   assert.doesNotMatch(analysis, /18 LGAs/i);
