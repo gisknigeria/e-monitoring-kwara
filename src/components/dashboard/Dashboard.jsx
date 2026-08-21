@@ -4127,12 +4127,14 @@ function Dashboard({ session, onLogout, onSessionUpdate }) {
     );
     await selectChatRoom(room);
   };
-  const sendChatMessage = async (body) => {
+  const sendChatMessage = async (payload) => {
     if (!activeRoom) return;
+    const body = typeof payload === "string" ? payload : payload?.body || "";
+    const attachments = Array.isArray(payload?.attachments) ? payload.attachments : [];
     const message = await request(
       `/chat/rooms/${activeRoom.id}/messages`,
       session.token,
-      { method: "POST", body: JSON.stringify({ body }) },
+      { method: "POST", body: JSON.stringify({ body, attachments }) },
     );
     setChatMessages((old) =>
       old.some((x) => x.id === message.id) ? old : [...old, message],

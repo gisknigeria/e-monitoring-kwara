@@ -1,5 +1,21 @@
-import { useMemo, useState } from "react";
-import { FaTimes } from "react-icons/fa";
+import { useMemo, useRef, useState } from "react";
+import { FaFile, FaImage, FaPaperclip, FaTimes, FaTrash, FaVideo } from "react-icons/fa";
+
+const MAX_CHAT_ATTACHMENT_BYTES = 5 * 1024 * 1024;
+const MAX_CHAT_TOTAL_BYTES = 7 * 1024 * 1024;
+const mimeByExtension = {
+  pdf: "application/pdf", doc: "application/msword", docx: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+  xls: "application/vnd.ms-excel", xlsx: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+  csv: "text/csv", txt: "text/plain", png: "image/png", jpg: "image/jpeg", jpeg: "image/jpeg", webp: "image/webp",
+  mp4: "video/mp4", webm: "video/webm",
+};
+const attachmentKind = mime => mime.startsWith("image/") ? "image" : mime.startsWith("video/") ? "video" : "document";
+const fileAsDataUrl = (file, mimeType) => new Promise((resolve, reject) => {
+  const reader = new FileReader();
+  reader.onload = () => resolve(String(reader.result || "").replace(/^data:[^;,]+;/, `data:${mimeType};`));
+  reader.onerror = () => reject(new Error(`Could not read ${file.name}`));
+  reader.readAsDataURL(file);
+});
 
 export default function ChatPanel({
   rooms,
@@ -18,6 +34,10 @@ export default function ChatPanel({
   const [newRoom, setNewRoom] = useState({ name: "", userId: "" });
   const [memberId, setMemberId] = useState("");
   const [text, setText] = useState("");
+  const [attachments, setAttachments] = useState([]);
+  const [attachmentError, setAttachmentError] = useState("");
+  const [sending, setSending] = useState(false);
+  const fileInputRef = useRef(null);
 
   const names = useMemo(
     () =>
@@ -43,9 +63,45 @@ export default function ChatPanel({
 
   const submitMessage = async (e) => {
     e.preventDefault();
-    if (!text.trim() || !activeRoom) return;
-    await onSend(text);
-    setText("");
+    if ((!text.trim() && !attachments.length) || !activeRoom || sending) return;
+    setSending(true);
+    setAttachmentError("");
+    try {
+      await onSend({ body: text.trim(), attachments });
+      setText("");
+      setAttachments([]);
+      if (fileInputRef.current) fileInputRef.current.value = "";
+    } catch (error) {
+      setAttachmentError(error.message || "Could not send this message");
+    } finally {
+      setSending(false);
+    }
+  };
+
+  const selectAttachments = async (event) => {
+    const files = Array.from(event.target.files || []);
+    setAttachmentError("");
+    if (attachments.length + files.length > 3) {
+      setAttachmentError("You can attach at most 3 files to one message.");
+      event.target.value = "";
+      return;
+    }
+    try {
+      const next = [];
+      for (const file of files) {
+        const extension = file.name.split(".").pop()?.toLowerCase() || "";
+        const mimeType = file.type || mimeByExtension[extension] || "";
+        if (!Object.values(mimeByExtension).includes(mimeType)) throw new Error(`${file.name} is not a supported image, video, or document.`);
+        if (file.size > MAX_CHAT_ATTACHMENT_BYTES) throw new Error(`${file.name} is larger than 5 MB.`);
+        next.push({ type: attachmentKind(mimeType), name: file.name, mimeType, size: file.size, data: await fileAsDataUrl(file, mimeType) });
+      }
+      if ([...attachments, ...next].reduce((sum, item) => sum + Number(item.size || 0), 0) > MAX_CHAT_TOTAL_BYTES) throw new Error("Attachments must be 7 MB or smaller in total.");
+      setAttachments((current) => [...current, ...next]);
+    } catch (error) {
+      setAttachmentError(error.message || "Could not attach this file.");
+    } finally {
+      event.target.value = "";
+    }
   };
 
   const addMember = async () => {
@@ -171,6 +227,12 @@ export default function ChatPanel({
                         (message.senderId === currentUser.id ? "You" : "User")}
                     </b>
                     <p>{message.body}</p>
+                    {!!message.attachments?.length && <div className="chat-attachments">{message.attachments.map((attachment, index) => (
+                      <div key={`${attachment.name}-${index}`} className={`chat-attachment ${attachment.type}`}>
+                        {attachment.type === "image" ? <img src={attachment.data} alt={attachment.name || "Chat attachment"} /> : attachment.type === "video" ? <video src={attachment.data} controls preload="metadata" /> : <FaFile />}
+                        <span><b>{attachment.name || `Attachment ${index + 1}`}</b><a href={attachment.data} download={attachment.name || "attachment"} target="_blank" rel="noreferrer">{attachment.type === "document" ? "Open or download document" : "Open or download"}</a></span>
+                      </div>
+                    ))}</div>}
                     <time>
                       {new Date(message.createdAt).toLocaleTimeString([], {
                         hour: "2-digit",
@@ -187,12 +249,16 @@ export default function ChatPanel({
                 )}
               </div>
               <form className="chat-send" onSubmit={submitMessage}>
+                {!!attachments.length && <div className="chat-selected-files">{attachments.map((attachment, index) => <span key={`${attachment.name}-${index}`}>{attachment.type === "image" ? <FaImage /> : attachment.type === "video" ? <FaVideo /> : <FaFile />}<b>{attachment.name}</b><button type="button" title="Remove attachment" onClick={() => setAttachments((current) => current.filter((_, itemIndex) => itemIndex !== index))}><FaTrash /></button></span>)}</div>}
+                {attachmentError && <p className="chat-attachment-error">{attachmentError}</p>}
+                <input ref={fileInputRef} className="chat-file-input" type="file" multiple accept="image/png,image/jpeg,image/webp,video/mp4,video/webm,application/pdf,.doc,.docx,.xls,.xlsx,.csv,.txt" onChange={selectAttachments} />
+                <button type="button" className="chat-attach-button" onClick={() => fileInputRef.current?.click()} title="Attach image, video, or document"><FaPaperclip /><span>Attach</span></button>
                 <input
                   value={text}
                   onChange={(e) => setText(e.target.value)}
-                  placeholder="Type a message"
+                  placeholder="Type a message or attach files"
                 />
-                <button className="primary">Send</button>
+                <button className="primary" disabled={sending || (!text.trim() && !attachments.length)}>{sending ? "Sending…" : "Send"}</button>
               </form>
             </>
           ) : (

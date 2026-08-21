@@ -11,7 +11,7 @@ import { dirname, join } from 'node:path';
 import pg from 'pg';
 import sharp from 'sharp';
 import { canManageRank, getRegistrationLocationOptions, normalizeCommand, normalizeRegistrationState, ranksBelow } from '../shared/electionData.js';
-import { credentialFingerprint, createId, createRateLimitState, normalizeText, sanitizeString, validateContentLength, validateCoordinates, validateEmail, validateExternalUrl, validateMediaPayload, validatePassword } from './security.js';
+import { credentialFingerprint, createId, createRateLimitState, normalizeText, sanitizeString, validateChatAttachments, validateContentLength, validateCoordinates, validateEmail, validateExternalUrl, validateMediaPayload, validatePassword } from './security.js';
 import { analyzeContextLocally, enforceKwaraPreElectionFacts, ensureUsableAnalysis, summarizeNewsLocally } from './ai.js';
 import { FALLBACK_ICE_SERVERS, normalizeMeteredDomain, normalizeMeteredRegion, sanitizeIceServers } from './turn.js';
 import { formatReverseLocation } from './location.js';
@@ -141,7 +141,7 @@ const toNotification = row => row && ({ id: row.id, userId: row.user_id, inciden
 const toCamera = row => row && ({ id: row.id, name: row.name, type: row.type, url: row.url, lat: Number(row.lat), lng: Number(row.lng), status: row.status, createdAt: row.created_at?.toISOString?.() || row.created_at });
 const toMapLayer = row => row && ({ id: row.id, name: row.name, type: row.type, data: row.data, url: row.url || '', bounds: row.bounds, opacity: Number(row.opacity ?? 0.65), fillOpacity: Number(row.fill_opacity ?? 0.18), category: row.category || (row.type === 'raster' ? 'Raster' : 'Point'), operationalUse: row.operational_use || 'Reference', color: row.color || '#facc15', fillColor: row.fill_color || '#f59e0b', lineWeight: Number(row.line_weight || 2), lineStyle: row.line_style || 'solid', pointIcon: row.point_icon || 'pin', pointIconColor: row.point_icon_color || '#ffffff', pointSize: Number(row.point_size || 24), showLabels: row.show_labels ?? true, labelField: row.label_field || 'name', popupFields: row.popup_fields || '', visible: row.visible ?? true, zIndex: Number(row.z_index || 0), createdAt: row.created_at?.toISOString?.() || row.created_at, updatedAt: row.updated_at?.toISOString?.() || row.updated_at });
 const toChatRoom = row => row && ({ id: row.id, name: row.name, type: row.type || 'room', incidentId: row.incident_id || '', createdBy: row.created_by || '', createdAt: row.created_at?.toISOString?.() || row.created_at, members: row.members || [] });
-const toChatMessage = row => row && ({ id: row.id, roomId: row.room_id, senderId: row.sender_id, body: row.body, createdAt: row.created_at?.toISOString?.() || row.created_at });
+const toChatMessage = row => row && ({ id: row.id, roomId: row.room_id, senderId: row.sender_id, body: row.body, attachments: row.attachments || [], createdAt: row.created_at?.toISOString?.() || row.created_at });
 
 async function initPostgres() {
   if (!pool) return;
@@ -242,6 +242,7 @@ async function initPostgres() {
       room_id text not null,
       sender_id text not null,
       body text not null,
+      attachments jsonb default '[]'::jsonb,
       created_at timestamptz default now()
     );
     create table if not exists notifications (
@@ -268,6 +269,7 @@ async function initPostgres() {
   await pool.query("alter table users add column if not exists polling_unit text default ''");
   await pool.query("alter table notifications add column if not exists room_id text default ''");
   await pool.query("alter table notifications add column if not exists sender_id text default ''");
+  await pool.query("alter table chat_messages add column if not exists attachments jsonb default '[]'::jsonb");
   await pool.query("alter table incidents add column if not exists report_type text default 'IP'");
   await pool.query("alter table incidents add column if not exists visible_to jsonb default '[]'::jsonb");
   await pool.query("alter table incidents add column if not exists media jsonb default '[]'::jsonb");
@@ -534,7 +536,7 @@ const store = {
   },
   async createChatMessage(message) {
     if (!pool) { jsonDb.chatMessages.push(message); saveJson(); return message; }
-    const { rows } = await pool.query('insert into chat_messages (id,room_id,sender_id,body,created_at) values ($1,$2,$3,$4,$5) returning *', [message.id, message.roomId, message.senderId, message.body, message.createdAt]);
+    const { rows } = await pool.query('insert into chat_messages (id,room_id,sender_id,body,attachments,created_at) values ($1,$2,$3,$4,$5,$6) returning *', [message.id, message.roomId, message.senderId, message.body, JSON.stringify(message.attachments || []), message.createdAt]);
     return toChatMessage(rows[0]);
   },
   async deleteChatRoom(roomId) {
@@ -2003,14 +2005,25 @@ app.post('/api/chat/rooms/:id/messages', auth, rateLimit, asyncRoute(async (req,
   const room = await store.chatRoom(req.params.id);
   if (!canAccessRoom(req.user, room)) return res.status(403).json({ message: 'You cannot send to this chat' });
   const body = normalizeText(req.body.body || '').trim();
-  if (!body) return res.status(400).json({ message: 'Message cannot be empty' });
-  const message = await store.createChatMessage({ id: createId('msg'), roomId: req.params.id, senderId: req.user.id, body, createdAt: new Date().toISOString() });
-  io.emit('chat:message', { roomId: req.params.id, message });
+  const attachments = (Array.isArray(req.body.attachments) ? req.body.attachments : []).slice(0, 3).map(item => ({
+    type: sanitizeString(item?.type || '').toLowerCase(),
+    name: sanitizeString(item?.name || 'attachment').slice(0, 180),
+    mimeType: sanitizeString(item?.mimeType || '').slice(0, 120),
+    size: Math.max(0, Number(item?.size) || 0),
+    data: String(item?.data || ''),
+  }));
+  const attachmentValidation = validateChatAttachments(attachments);
+  if (!attachmentValidation.valid) return res.status(400).json({ message: attachmentValidation.errors[0] || 'Invalid chat attachment' });
+  if (!body && !attachments.length) return res.status(400).json({ message: 'Enter a message or attach a file' });
+  const message = await store.createChatMessage({ id: createId('msg'), roomId: req.params.id, senderId: req.user.id, body, attachments, createdAt: new Date().toISOString() });
+  for (const client of io.sockets.sockets.values()) {
+    if (client.data.authUser && canAccessRoom(client.data.authUser, room)) client.emit('chat:message', { roomId: req.params.id, message });
+  }
   if (isAdminRole(req.user)) {
     for (const userId of (room.members || []).filter(id => id !== req.user.id)) {
       const notification = await store.createNotification({
         id: createId('notif'), userId, incidentId: room.incidentId || '', roomId: room.id,
-        senderId: req.user.id, message: body, incidentType: 'Message from Admin', createdAt: message.createdAt
+        senderId: req.user.id, message: body || `Sent ${attachments.length} attachment${attachments.length === 1 ? '' : 's'}`, incidentType: 'Message from Admin', createdAt: message.createdAt
       });
       emitNotification(notification);
     }
