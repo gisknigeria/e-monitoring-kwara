@@ -17,10 +17,6 @@ services:
       # from arbitrary origins. Override this value if the service name changes.
       - key: CORS_ORIGIN
         value: https://e-monitoring-kwara.onrender.com
-      # Leave blank until INEC publishes the Kwara 2027 IReV election ID.
-      # When configured, the feed activates automatically without a code change.
-      - key: IREV_KWARA_ELECTION_ID
-        sync: false
       - key: DATABASE_URL
         sync: false
       - key: ADMIN_EMAIL

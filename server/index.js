@@ -1140,24 +1140,21 @@ app.get('/api/boundaries/kwara', rateLimit, asyncRoute(async (_req, res) => {
   }
 }));
 const IREV_API_ORIGIN = 'https://dolphin-app-sleqh.ondigitalocean.app';
-const configuredKwaraIrevId = sanitizeString(process.env.IREV_KWARA_ELECTION_ID || '').toLowerCase();
-const IREV_KWARA_ELECTION_ID = /^[a-f0-9]{24}$/.test(configuredKwaraIrevId) ? configuredKwaraIrevId : '';
-const IREV_KWARA_PORTAL_URL = IREV_KWARA_ELECTION_ID
-  ? `https://irev.inecnigeria.org/elections/${IREV_KWARA_ELECTION_ID}`
-  : 'https://irev.inecnigeria.org/';
+const IREV_OSUN_ELECTION_ID = '6a7f788adcbc755a763f082a';
+const IREV_OSUN_PORTAL_URL = `https://irev.inecnigeria.org/elections/${IREV_OSUN_ELECTION_ID}`;
 const IREV_IMAGE_HOSTS = new Set(['inc-s3-cache.incportals.com', 'etransmission-result-docs.s3.eu-west-2.amazonaws.com']);
-let irevKwaraCache = null;
+let irevOsunCache = null;
 const irevOcrCache = new Map();
-const IREV_KWARA_ARCHIVE_KEY = 'irev_kwara_2027_archive_v1';
-const IREV_KWARA_OCR_KEY = 'irev_kwara_2027_ocr_v1';
+const IREV_OSUN_ARCHIVE_KEY = 'irev_osun_archive_v1';
+const IREV_OSUN_OCR_KEY = 'irev_osun_ocr_v1';
 let irevArchiveLoadPromise = null;
 const ensureIrevArchiveLoaded = () => {
   if (!irevArchiveLoadPromise) irevArchiveLoadPromise = Promise.all([
-    store.setting(IREV_KWARA_ARCHIVE_KEY, null),
-    store.setting(IREV_KWARA_OCR_KEY, {}),
+    store.setting(IREV_OSUN_ARCHIVE_KEY, null),
+    store.setting(IREV_OSUN_OCR_KEY, {}),
   ]).then(async ([archive, extractions]) => {
-    if (IREV_KWARA_ELECTION_ID && archive?.electionId === IREV_KWARA_ELECTION_ID && Array.isArray(archive.uploads)) {
-      irevKwaraCache = { data: { ...archive, offline: true }, expiresAt: 0 };
+    if (archive?.electionId === IREV_OSUN_ELECTION_ID && Array.isArray(archive.uploads)) {
+      irevOsunCache = { data: { ...archive, offline: true }, expiresAt: 0 };
     }
     const savedExtractions = Object.entries(extractions || {});
     const supportedExtractions = savedExtractions.filter(([, extraction]) =>
@@ -1168,7 +1165,7 @@ const ensureIrevArchiveLoaded = () => {
       if (id) irevOcrCache.set(id, extraction);
     }
     if (supportedExtractions.length !== savedExtractions.length) {
-      await store.setSetting(IREV_KWARA_OCR_KEY, Object.fromEntries(supportedExtractions));
+      await store.setSetting(IREV_OSUN_OCR_KEY, Object.fromEntries(supportedExtractions));
     }
   });
   return irevArchiveLoadPromise;
@@ -1207,52 +1204,34 @@ const normalizeIrevUpload = item => {
     ward: sanitizeString(pollingUnit?.ward?.name || ''),
     uploadedAt: item?.document?.updated_at || item?.updated_at || '',
     imageUrl: isTrustedIrevImage(imageUrl) ? imageUrl : '',
-    sourceUrl: IREV_KWARA_PORTAL_URL,
+    sourceUrl: IREV_OSUN_PORTAL_URL,
     verificationStatus: 'Awaiting verification',
   };
 };
-const kwaraIrevWaitingData = () => ({
-  configured: false,
-  pilot: false,
-  state: 'Kwara',
-  electionId: '',
-  electionName: 'Kwara 2027 General Election',
-  portalUrl: IREV_KWARA_PORTAL_URL,
-  submitted: 0,
-  expected: 0,
-  latestUploadAt: '',
-  uploads: [],
-  fetchedAt: new Date().toISOString(),
-  archivedAt: '',
-  offline: false,
-  refreshIntervalMs: 900_000,
-  notice: 'INEC has not published the Kwara 2027 IReV election identifier yet. Live polling is paused and will activate after the identifier is configured.',
-});
-const loadKwaraIrev = async (force = false) => {
+const loadOsunIrevPilot = async (force = false) => {
   await ensureIrevArchiveLoaded();
-  if (!IREV_KWARA_ELECTION_ID) return kwaraIrevWaitingData();
-  if (!force && irevKwaraCache?.expiresAt > Date.now()) return irevKwaraCache.data;
+  if (!force && irevOsunCache?.expiresAt > Date.now()) return irevOsunCache.data;
   try {
     const [stats, allUnits] = await Promise.all([
-      fetchIrevJson(`elections/${IREV_KWARA_ELECTION_ID}/result/stats`),
-      fetchIrevJson(`elections/${IREV_KWARA_ELECTION_ID}/pus`, 16 * 1024 * 1024),
+      fetchIrevJson(`elections/${IREV_OSUN_ELECTION_ID}/result/stats`),
+      fetchIrevJson(`elections/${IREV_OSUN_ELECTION_ID}/pus`, 16 * 1024 * 1024),
     ]);
     const liveUploads = (Array.isArray(allUnits) ? allUnits : [])
       .map(normalizeIrevUpload)
       .filter(item => item.id && item.puCode && item.imageUrl);
-    const mergedUploads = new Map((irevKwaraCache?.data?.uploads || []).map(upload => [upload.id, upload]));
+    const mergedUploads = new Map((irevOsunCache?.data?.uploads || []).map(upload => [upload.id, upload]));
     liveUploads.forEach(upload => mergedUploads.set(upload.id, upload));
     const uploads = [...mergedUploads.values()].sort((a, b) => `${a.lga}|${a.ward}|${a.puCode}`.localeCompare(`${b.lga}|${b.ward}|${b.puCode}`));
     const data = {
       pilot: true,
       configured: true,
-      state: 'Kwara',
-      electionId: IREV_KWARA_ELECTION_ID,
-      electionName: sanitizeString(allUnits?.[0]?.election?.full_name || irevKwaraCache?.data?.electionName || 'Kwara 2027 General Election'),
-      portalUrl: IREV_KWARA_PORTAL_URL,
+      state: 'Osun',
+      electionId: IREV_OSUN_ELECTION_ID,
+      electionName: sanitizeString(allUnits?.[0]?.election?.full_name || irevOsunCache?.data?.electionName || 'Osun governorship election'),
+      portalUrl: IREV_OSUN_PORTAL_URL,
       submitted: Math.max(uploads.length, Number(stats?.documents) || 0),
-      expected: Math.max(0, Number(stats?.expected ?? stats?.pus) || irevKwaraCache?.data?.expected || 0),
-      latestUploadAt: stats?.latest?.document?.updated_at || stats?.latest?.updated_at || liveUploads[0]?.uploadedAt || irevKwaraCache?.data?.latestUploadAt || '',
+      expected: Math.max(0, Number(stats?.expected ?? stats?.pus) || irevOsunCache?.data?.expected || 0),
+      latestUploadAt: stats?.latest?.document?.updated_at || stats?.latest?.updated_at || liveUploads[0]?.uploadedAt || irevOsunCache?.data?.latestUploadAt || '',
       uploads,
       fetchedAt: new Date().toISOString(),
       archivedAt: new Date().toISOString(),
@@ -1260,26 +1239,26 @@ const loadKwaraIrev = async (force = false) => {
       refreshIntervalMs: 60_000,
       notice: '',
     };
-    const previous = irevKwaraCache?.data;
+    const previous = irevOsunCache?.data;
     const changed = !previous || previous.uploads?.length !== data.uploads.length || previous.latestUploadAt !== data.latestUploadAt || previous.submitted !== data.submitted;
-    irevKwaraCache = { data, expiresAt: Date.now() + 55_000 };
-    if (changed) await store.setSetting(IREV_KWARA_ARCHIVE_KEY, data);
+    irevOsunCache = { data, expiresAt: Date.now() + 55_000 };
+    if (changed) await store.setSetting(IREV_OSUN_ARCHIVE_KEY, data);
     return data;
   } catch (error) {
-    if (irevKwaraCache?.data?.uploads?.length) {
+    if (irevOsunCache?.data?.uploads?.length) {
       console.warn('[irev] Live source unavailable; serving persistent archive:', error.message);
-      return { ...irevKwaraCache.data, offline: true, refreshIntervalMs: 300_000, notice: 'Live IReV is unavailable. Showing the last Kwara results saved on this server.' };
+      return { ...irevOsunCache.data, offline: true, refreshIntervalMs: 300_000, notice: 'Live IReV is unavailable. Showing the last Osun results saved on this server.' };
     }
     throw error;
   }
 };
-app.get('/api/irev/kwara', auth, rateLimit, asyncRoute(async (req, res) => {
+app.get('/api/irev/osun', auth, rateLimit, asyncRoute(async (req, res) => {
   try {
-    const data = await loadKwaraIrev(req.query.refresh === '1' && isAdminRole(req.user));
+    const data = await loadOsunIrevPilot(req.query.refresh === '1' && isAdminRole(req.user));
     res.set('Cache-Control', 'private, no-store');
     return res.json({ ...data, uploads: data.uploads.map(upload => ({ ...upload, extraction: irevOcrCache.get(upload.id) || null })) });
   } catch (error) {
-    console.error('[irev] Kwara feed fetch failed:', error.message);
+    console.error('[irev] Osun pilot fetch failed:', error.message);
     return res.status(503).json({ message: 'The official IReV feed is temporarily unavailable.' });
   }
 }));
@@ -1301,9 +1280,9 @@ const optimizeIrevImage = imageBytes => {
   irevImageOptimizationQueue = job.catch(() => {});
   return job;
 };
-app.post('/api/irev/kwara/ocr', auth, adminOnly, irevOcrRateLimit, asyncRoute(async (req, res) => {
+app.post('/api/irev/osun/ocr', auth, adminOnly, irevOcrRateLimit, asyncRoute(async (req, res) => {
   const uploadId = sanitizeString(req.body?.uploadId || '');
-  const pilot = await loadKwaraIrev();
+  const pilot = await loadOsunIrevPilot();
   const upload = pilot.uploads.find(item => item.id === uploadId);
   if (!upload) return res.status(404).json({ message: 'IReV upload not found in the recent official feed.' });
   if (irevOcrCache.has(uploadId)) return res.json(irevOcrCache.get(uploadId));
@@ -1366,7 +1345,7 @@ app.post('/api/irev/kwara/ocr', auth, adminOnly, irevOcrRateLimit, asyncRoute(as
   if (!results.length) return res.status(502).json({ message: 'No readable party vote counts were extracted from this image.' });
   const extraction = { uploadId, results, provider: 'gemini', model: geminiVisionModel, sourceUrl: upload.imageUrl, extractedAt: new Date().toISOString() };
   irevOcrCache.set(uploadId, extraction);
-  const persistenceTask = irevOcrPersistQueue.then(() => store.setSetting(IREV_KWARA_OCR_KEY, Object.fromEntries(irevOcrCache)));
+  const persistenceTask = irevOcrPersistQueue.then(() => store.setSetting(IREV_OSUN_OCR_KEY, Object.fromEntries(irevOcrCache)));
   irevOcrPersistQueue = persistenceTask.catch(error => console.error('[irev] Could not persist OCR result:', error.message));
   await persistenceTask;
   return res.json(extraction);
@@ -2125,15 +2104,11 @@ app.use((err, _, res, __) => {
 if (process.env.NODE_ENV === 'production') { app.use(express.static(join(__dirname, '..', 'dist'))); app.get(/.*/, (_, res) => res.sendFile(join(__dirname, '..', 'dist', 'index.html'))); }
 let irevInitialSyncTimer = null;
 let irevArchiveSyncTimer = null;
-if (IREV_KWARA_ELECTION_ID) {
-  const irevArchiveSync = () => loadKwaraIrev(true).catch(error => console.warn('[irev] Background Kwara archive update failed:', error.message));
-  irevInitialSyncTimer = setTimeout(irevArchiveSync, 5_000);
-  irevInitialSyncTimer.unref?.();
-  irevArchiveSyncTimer = setInterval(irevArchiveSync, 5 * 60_000);
-  irevArchiveSyncTimer.unref?.();
-} else {
-  console.log('[irev] Kwara 2027 feed is dormant until IREV_KWARA_ELECTION_ID is configured.');
-}
+const irevArchiveSync = () => loadOsunIrevPilot(true).catch(error => console.warn('[irev] Background Osun archive update failed:', error.message));
+irevInitialSyncTimer = setTimeout(irevArchiveSync, 2_000);
+irevInitialSyncTimer.unref?.();
+irevArchiveSyncTimer = setInterval(irevArchiveSync, 60_000);
+irevArchiveSyncTimer.unref?.();
 const port = Number(process.env.PORT) || 5000;
 server.listen(port, '0.0.0.0', () => console.log(`Election Monitoring Command API listening on port ${port}`));
 let shuttingDown = false;

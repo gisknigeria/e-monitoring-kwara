@@ -2283,7 +2283,7 @@ function ResultsCenter({ incidents, parties = [], officers = [], personnel = [],
     setIrevLoading(true);
     setIrevError("");
     try {
-      const pilot = await request(`/irev/kwara${force ? "?refresh=1" : ""}`, authToken);
+      const pilot = await request(`/irev/osun${force ? "?refresh=1" : ""}`, authToken);
       setIrevPilot(pilot);
       setIrevDrafts((current) => ({
         ...Object.fromEntries((pilot.uploads || []).filter((upload) => upload.extraction?.provider === "gemini").map((upload) => [upload.id, upload.extraction])),
@@ -2312,7 +2312,7 @@ function ResultsCenter({ incidents, parties = [], officers = [], personnel = [],
     setIrevExtractingIds((current) => new Set(current).add(uploadId));
     setIrevError("");
     try {
-      const result = await request("/irev/kwara/ocr", authToken, { method: "POST", body: JSON.stringify({ uploadId }) });
+      const result = await request("/irev/osun/ocr", authToken, { method: "POST", body: JSON.stringify({ uploadId }) });
       setIrevDrafts((current) => ({ ...current, [uploadId]: result }));
     } catch (error) {
       if (["IREV_IMAGE_RATE_LIMITED", "OCR_QUEUE_RATE_LIMITED"].includes(error.code) || (error.status === 429 && !["AI_QUOTA_EXHAUSTED", "AI_RATE_LIMITED"].includes(error.code))) {
@@ -2656,7 +2656,7 @@ function ResultsCenter({ incidents, parties = [], officers = [], personnel = [],
     const pilot = await loadIrevPilot();
     setIrevCompareLoading(false);
     if (pilot?.configured && pilot.uploads?.length) setCompareWithIrev(true);
-    else setIrevError("Kwara 2027 IReV results are not available yet.");
+    else setIrevError("Osun IReV results are not available right now.");
   };
   const partyVoteFor = (row, party) => Number(row?.results?.find((result) => normalizeResultKeyPart(result.party) === normalizeResultKeyPart(party))?.votes || 0);
   const renderFieldVote = (row, party) => {
@@ -2780,8 +2780,8 @@ function ResultsCenter({ incidents, parties = [], officers = [], personnel = [],
         </>}
         {view === "irev" && <section className="irev-pilot-card">
           <header className="irev-pilot-head">
-            <div><span className="eyebrow">OFFICIAL SOURCE · KWARA 2027</span><h2>INEC IReV — Kwara</h2><p>Prepared for Kwara polling-unit result sheets and automatic verification during the 2027 general election.</p></div>
-            <div className="irev-pilot-actions"><a href={irevPilot?.portalUrl || "https://irev.inecnigeria.org/"} target="_blank" rel="noreferrer">Open IReV</a><button type="button" disabled={irevLoading || irevPilot?.configured === false} onClick={() => loadIrevPilot(true)}><FaSyncAlt /> {irevLoading ? "Checking…" : irevPilot?.configured === false ? "Awaiting INEC" : "Refresh now"}</button></div>
+            <div><span className="eyebrow">LIVE OFFICIAL SOURCE · SHOWCASE PILOT</span><h2>INEC IReV — Osun</h2><p>Reads public polling-unit upload metadata and original result-sheet images from IReV every 60 seconds.</p></div>
+            <div className="irev-pilot-actions"><a href={irevPilot?.portalUrl || "https://irev.inecnigeria.org/"} target="_blank" rel="noreferrer">Open IReV</a><button type="button" disabled={irevLoading} onClick={() => loadIrevPilot(true)}><FaSyncAlt /> {irevLoading ? "Checking…" : "Refresh now"}</button></div>
           </header>
           {irevError && <div className="error">{irevError}</div>}
           {irevAiStoppedReason && <div className="irev-ai-stopped"><MdWarning /><div><strong>OCR status</strong><span>{irevAiStoppedReason}</span></div></div>}
@@ -2789,14 +2789,13 @@ function ResultsCenter({ incidents, parties = [], officers = [], personnel = [],
             {irevSection === "results" && irevResultRows.length > 0 && <section className="result-total-strip irev-result-totals">{irevTopParties.map((party) => <article className="result-total-card" key={party}><span>{party}</span><strong>{irevOnlyTotals[party].toLocaleString()}</strong></article>)}</section>}
             <div className="irev-pilot-stats"><div><span>Uploaded</span><strong>{irevPilot.submitted.toLocaleString()}</strong></div><div><span>Expected</span><strong>{irevPilot.expected.toLocaleString()}</strong></div><div><span>Coverage</span><strong>{irevPilot.expected ? `${((irevPilot.submitted / irevPilot.expected) * 100).toFixed(1)}%` : "—"}</strong></div><div><span>Last checked</span><strong>{new Date(irevPilot.fetchedAt).toLocaleTimeString()}</strong></div></div>
             {irevPilot.notice && <p className="irev-verification-note"><MdWarning /> {irevPilot.notice}</p>}
-            {!irevPilot.configured && <div className="irev-activation-panel"><div><span>20 February 2027</span><strong>Presidential &amp; National Assembly</strong></div><div><span>6 March 2027</span><strong>Governorship &amp; State Assembly</strong></div><p>The server will not contact the result feed until INEC publishes the Kwara election identifier and it is added as <code>IREV_KWARA_ELECTION_ID</code> on Render.</p></div>}
             <div className="wl-sub-tabs irev-sub-tabs"><button className={irevSection === "uploads" ? "wl-sub-tab active" : "wl-sub-tab"} onClick={() => setIrevSection("uploads")}>Polling-unit uploads</button>{irevResultRows.length > 0 && <button className={irevSection === "results" ? "wl-sub-tab active" : "wl-sub-tab"} onClick={() => setIrevSection("results")}>Results</button>}{irevExtractingIds.size > 0 && <span>Reading {irevExtractingIds.size} sheets in parallel… {irevResultRows.length.toLocaleString()} ready</span>}</div>
             {irevSection === "uploads" && <>
-            <div className="irev-table-toolbar"><div><strong>{irevPilot.configured ? "All uploaded polling units" : "Kwara result-sheet feed"}</strong><span>{irevPilot.configured ? `${filteredIrevUploads.length.toLocaleString()} of ${irevPilot.uploads.length.toLocaleString()} sheets shown` : "Waiting for INEC activation"}</span></div><label><FaSearch /><input disabled={!irevPilot.configured} value={irevSearch} onChange={(event) => setIrevSearch(event.target.value)} placeholder={irevPilot.configured ? "Search LGA, ward, polling unit or PU code" : "Search activates with the live feed"} />{irevSearch && <button type="button" onClick={() => setIrevSearch("")} aria-label="Clear IReV search"><FaTimes /></button>}</label></div>
+            <div className="irev-table-toolbar"><div><strong>All uploaded polling units</strong><span>{filteredIrevUploads.length.toLocaleString()} of {irevPilot.uploads.length.toLocaleString()} sheets shown</span></div><label><FaSearch /><input value={irevSearch} onChange={(event) => setIrevSearch(event.target.value)} placeholder="Search LGA, ward, polling unit or PU code" />{irevSearch && <button type="button" onClick={() => setIrevSearch("")} aria-label="Clear IReV search"><FaTimes /></button>}</label></div>
             <div className="irev-table-scroll">
               <table className="result-progress-table irev-full-table">
                 <thead><tr><th>#</th><th>LGA</th><th>Ward</th><th>Polling unit</th><th>PU code</th><th>Uploaded</th><th>Status</th><th>Result sheet</th></tr></thead>
-                <tbody>{filteredIrevUploads.map((upload, index) => <tr key={upload.id}><td>{index + 1}</td><td><b>{upload.lga || "—"}</b></td><td>{upload.ward || "—"}</td><td>{upload.pollingUnit || "—"}</td><td><strong>{upload.puCode}</strong></td><td>{upload.uploadedAt ? new Date(upload.uploadedAt).toLocaleString() : "—"}</td><td><span className="irev-awaiting-badge">{upload.verificationStatus}</span></td><td><button className="irev-sheet-link" type="button" onClick={() => openIrevPreview(upload)}>View image</button></td></tr>)}{!filteredIrevUploads.length && <tr><td className="result-empty" colSpan="8">{irevPilot.configured ? "No Kwara result sheets have been uploaded yet." : "The Kwara 2027 IReV feed is waiting for its official INEC election identifier."}</td></tr>}</tbody>
+                <tbody>{filteredIrevUploads.map((upload, index) => <tr key={upload.id}><td>{index + 1}</td><td><b>{upload.lga || "—"}</b></td><td>{upload.ward || "—"}</td><td>{upload.pollingUnit || "—"}</td><td><strong>{upload.puCode}</strong></td><td>{upload.uploadedAt ? new Date(upload.uploadedAt).toLocaleString() : "—"}</td><td><span className="irev-awaiting-badge">{upload.verificationStatus}</span></td><td><button className="irev-sheet-link" type="button" onClick={() => openIrevPreview(upload)}>View image</button></td></tr>)}{!filteredIrevUploads.length && <tr><td className="result-empty" colSpan="8">No Osun result sheets are available from the live source right now.</td></tr>}</tbody>
               </table>
             </div>
             </>}
