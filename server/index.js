@@ -9,19 +9,14 @@ import { randomBytes } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 import pg from 'pg';
-import sharp from 'sharp';
 import { canManageRank, getRegistrationLocationOptions, normalizeCommand, normalizeRegistrationState, ranksBelow } from '../shared/electionData.js';
 import { credentialFingerprint, createId, createRateLimitState, normalizeText, sanitizeString, validateChatAttachments, validateContentLength, validateCoordinates, validateEmail, validateExternalUrl, validateMediaPayload, validatePassword } from './security.js';
 import { analyzeContextLocally, enforceKwaraPreElectionFacts, ensureUsableAnalysis, summarizeNewsLocally } from './ai.js';
 import { FALLBACK_ICE_SERVERS, normalizeMeteredDomain, normalizeMeteredRegion, sanitizeIceServers } from './turn.js';
 import { formatReverseLocation } from './location.js';
+import { OSUN_2026_PUBLISHED_RESULTS } from './osun2026Results.js';
 
 const { Pool } = pg;
-// Render instances have a tight memory ceiling. Keep libvips from retaining
-// large decoded election sheets between requests and decode only one image at
-// a time; Groq calls can still overlap after the small optimized JPEG is ready.
-sharp.cache({ memory: 16, files: 0, items: 10 });
-sharp.concurrency(1);
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const dataFile = process.env.DATA_FILE || join(__dirname, 'data.json');
 const jwtSecretFile = process.env.JWT_SECRET_FILE || `${dataFile}.jwt-secret`;
@@ -584,7 +579,6 @@ const io = new Server(server, {
 const activeCameraShares = new Map();
 const loginLimiter = createRateLimitState();
 const generalLimiter = createRateLimitState();
-const irevOcrLimiter = createRateLimitState();
 const socketLimiter = createRateLimitState();
 const reverseLocationCache = new Map();
 let reverseLocationQueue = Promise.resolve();
@@ -621,7 +615,6 @@ const openAiFallbackModel = process.env.OPENAI_FALLBACK_MODEL || 'gpt-5.6-luna';
 const groqPrimaryModel = process.env.GROQ_MODEL || 'openai/gpt-oss-20b';
 const groqFallbackModel = process.env.GROQ_FALLBACK_MODEL || 'openai/gpt-oss-20b';
 const groqNewsModel = process.env.GROQ_NEWS_MODEL || 'groq/compound-mini';
-const geminiVisionModel = process.env.GEMINI_VISION_MODEL || 'gemini-3.5-flash-lite';
 const geminiApiKeys = [...new Set([
   process.env.GEMINI_API_KEY,
   process.env.GEMINI_API_KEY_2,
@@ -636,51 +629,6 @@ const geminiApiKeys = [...new Set([
 ].map(value => String(value || '').trim()).filter(Boolean))];
 const geminiKeyCooldowns = new Map();
 let geminiKeyCursor = 0;
-const callGeminiVision = async payload => {
-  if (!geminiApiKeys.length) {
-    const error = new Error('Gemini is not configured.');
-    error.status = 503;
-    throw error;
-  }
-  let lastError;
-  for (let attempt = 0; attempt < geminiApiKeys.length; attempt += 1) {
-    const keyIndex = geminiKeyCursor % geminiApiKeys.length;
-    geminiKeyCursor = (geminiKeyCursor + 1) % geminiApiKeys.length;
-    const apiKey = geminiApiKeys[keyIndex];
-    if ((geminiKeyCooldowns.get(apiKey) || 0) > Date.now()) continue;
-    let response;
-    let body = {};
-    try {
-      response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(geminiVisionModel)}:generateContent?key=${encodeURIComponent(apiKey)}`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        signal: AbortSignal.timeout(35_000),
-        body: JSON.stringify(payload),
-      });
-      body = await response.json().catch(() => ({}));
-    } catch (cause) {
-      lastError = new Error('Gemini is temporarily unavailable.');
-      lastError.status = 503;
-      lastError.cause = cause;
-      geminiKeyCooldowns.set(apiKey, Date.now() + 15_000);
-      continue;
-    }
-    if (response.ok) return body;
-    lastError = new Error(body?.error?.message || 'Gemini could not read this result sheet.');
-    lastError.status = response.status;
-    if ([401, 403, 429].includes(response.status) || response.status >= 500) {
-      const cooldownMs = response.status === 429 || [401, 403].includes(response.status) ? 15 * 60_000 : 30_000;
-      geminiKeyCooldowns.set(apiKey, Date.now() + cooldownMs);
-      continue;
-    }
-    throw lastError;
-  }
-  if (!lastError) {
-    lastError = new Error('All Gemini keys are cooling down.');
-    lastError.status = 429;
-  }
-  throw lastError;
-};
 const callGeminiText = async (prompt, model) => {
   if (!geminiApiKeys.length) {
     const error = new Error('Gemini is not configured.');
@@ -940,16 +888,6 @@ const rateLimit = (req, res, next) => {
   }
   next();
 };
-const irevOcrRateLimit = (req, res, next) => {
-  const key = `${req.ip || 'global'}:${req.user?.id || 'anonymous'}`;
-  const result = irevOcrLimiter.hit(key, 600, 60_000);
-  res.setHeader('RateLimit-Remaining', String(result.remaining));
-  if (!result.allowed) {
-    res.setHeader('Retry-After', String(Math.max(1, Math.ceil((result.resetAt - Date.now()) / 1000))));
-    return res.status(429).json({ code: 'OCR_QUEUE_RATE_LIMITED', message: 'OCR is temporarily paused and will resume automatically.' });
-  }
-  next();
-};
 const loginRateLimit = (req, res, next) => {
   const key = `${req.ip || 'global'}:${String(req.body?.email || '').trim().toLowerCase()}`;
   const result = loginLimiter.hit(key, 5, 15 * 60_000);
@@ -1144,28 +1082,12 @@ const IREV_OSUN_ELECTION_ID = '6a7f788adcbc755a763f082a';
 const IREV_OSUN_PORTAL_URL = `https://irev.inecnigeria.org/elections/${IREV_OSUN_ELECTION_ID}`;
 const IREV_IMAGE_HOSTS = new Set(['inc-s3-cache.incportals.com', 'etransmission-result-docs.s3.eu-west-2.amazonaws.com']);
 let irevOsunCache = null;
-const irevOcrCache = new Map();
 const IREV_OSUN_ARCHIVE_KEY = 'irev_osun_archive_v1';
-const IREV_OSUN_OCR_KEY = 'irev_osun_ocr_v1';
 let irevArchiveLoadPromise = null;
 const ensureIrevArchiveLoaded = () => {
-  if (!irevArchiveLoadPromise) irevArchiveLoadPromise = Promise.all([
-    store.setting(IREV_OSUN_ARCHIVE_KEY, null),
-    store.setting(IREV_OSUN_OCR_KEY, {}),
-  ]).then(async ([archive, extractions]) => {
+  if (!irevArchiveLoadPromise) irevArchiveLoadPromise = store.setting(IREV_OSUN_ARCHIVE_KEY, null).then(archive => {
     if (archive?.electionId === IREV_OSUN_ELECTION_ID && Array.isArray(archive.uploads)) {
       irevOsunCache = { data: { ...archive, offline: true }, expiresAt: 0 };
-    }
-    const savedExtractions = Object.entries(extractions || {});
-    const supportedExtractions = savedExtractions.filter(([, extraction]) =>
-      String(extraction?.provider || '').trim().toLowerCase() === 'gemini'
-      && Array.isArray(extraction?.results),
-    );
-    for (const [id, extraction] of supportedExtractions) {
-      if (id) irevOcrCache.set(id, extraction);
-    }
-    if (supportedExtractions.length !== savedExtractions.length) {
-      await store.setSetting(IREV_OSUN_OCR_KEY, Object.fromEntries(supportedExtractions));
     }
   });
   return irevArchiveLoadPromise;
@@ -1256,100 +1178,16 @@ app.get('/api/irev/osun', auth, rateLimit, asyncRoute(async (req, res) => {
   try {
     const data = await loadOsunIrevPilot(req.query.refresh === '1' && isAdminRole(req.user));
     res.set('Cache-Control', 'private, no-store');
-    return res.json({ ...data, uploads: data.uploads.map(upload => ({ ...upload, extraction: irevOcrCache.get(upload.id) || null })) });
+    return res.json(data);
   } catch (error) {
     console.error('[irev] Osun pilot fetch failed:', error.message);
     return res.status(503).json({ message: 'The official IReV feed is temporarily unavailable.' });
   }
 }));
-let irevOcrPersistQueue = Promise.resolve();
-let irevImageOptimizationQueue = Promise.resolve();
-const optimizeIrevImage = imageBytes => {
-  const job = irevImageOptimizationQueue.then(() => sharp(imageBytes, {
-    sequentialRead: true,
-    limitInputPixels: 25_000_000,
-  })
-    .rotate()
-    .trim({ background: '#ffffff', threshold: 8 })
-    .resize({ width: 1600, withoutEnlargement: true, fit: 'inside', fastShrinkOnLoad: true })
-    .grayscale()
-    .normalize()
-    .sharpen()
-    .jpeg({ quality: 80, chromaSubsampling: '4:4:4' })
-    .toBuffer());
-  irevImageOptimizationQueue = job.catch(() => {});
-  return job;
-};
-app.post('/api/irev/osun/ocr', auth, adminOnly, irevOcrRateLimit, asyncRoute(async (req, res) => {
-  const uploadId = sanitizeString(req.body?.uploadId || '');
-  const pilot = await loadOsunIrevPilot();
-  const upload = pilot.uploads.find(item => item.id === uploadId);
-  if (!upload) return res.status(404).json({ message: 'IReV upload not found in the recent official feed.' });
-  if (irevOcrCache.has(uploadId)) return res.json(irevOcrCache.get(uploadId));
-  const imageResponse = await fetch(upload.imageUrl, { signal: AbortSignal.timeout(20_000), headers: { 'User-Agent': 'Election-Monitor/1.0 IReV OCR archive' } });
-  if (imageResponse.status === 429) return res.status(429).json({ code: 'IREV_IMAGE_RATE_LIMITED', message: 'IReV is temporarily limiting image downloads. OCR will resume automatically.' });
-  if (!imageResponse.ok) return res.status(502).json({ code: 'OCR_IMAGE_UNAVAILABLE', message: 'The official result image could not be retrieved.' });
-  const imageBytes = Buffer.from(await imageResponse.arrayBuffer());
-  if (!imageBytes.length) return res.status(422).json({ code: 'OCR_IMAGE_EMPTY', message: 'The IReV result image is empty.' });
-  if (imageBytes.length > 8 * 1024 * 1024) return res.status(413).json({ code: 'OCR_IMAGE_TOO_LARGE', message: 'The IReV result image is too large to extract.' });
-  try {
-    const metadata = await sharp(imageBytes).metadata();
-    if (!metadata.format || !metadata.width || !metadata.height) throw new Error('Invalid image');
-  } catch {
-    return res.status(415).json({ code: 'OCR_IMAGE_FORMAT', message: 'This file is not a valid result-sheet image.' });
-  }
-  if (!geminiApiKeys.length) return res.status(503).json({ code: 'AI_NOT_CONFIGURED', message: 'Gemini is not configured. Polling-unit uploads remain available.' });
-  let body;
-  try {
-    const optimizedImage = await optimizeIrevImage(imageBytes);
-    body = await callGeminiVision({
-      contents: [{ parts: [
-        { text: 'Read only the political-party vote table in this Nigerian INEC result sheet. Return every clearly readable party abbreviation and its vote count. Do not include totals, explanations, headings, or uncertain guesses.' },
-        { inline_data: { mime_type: 'image/jpeg', data: optimizedImage.toString('base64') } },
-      ] }],
-      generationConfig: {
-        responseMimeType: 'application/json',
-        responseSchema: {
-          type: 'OBJECT',
-          properties: {
-            results: {
-              type: 'ARRAY',
-              items: {
-                type: 'OBJECT',
-                properties: { party: { type: 'STRING' }, votes: { type: 'INTEGER' } },
-                required: ['party', 'votes'],
-              },
-            },
-          },
-          required: ['results'],
-        },
-      },
-    });
-  } catch (error) {
-    console.warn('[irev] Gemini extraction unavailable:', error.status || '', error.message);
-    if (error.status === 429) return res.status(429).json({ code: 'AI_QUOTA_EXHAUSTED', message: 'Gemini extraction is paused because its quota is unavailable. Polling-unit uploads remain visible.' });
-    return res.status(503).json({ code: 'AI_SERVICE_UNAVAILABLE', message: 'Gemini is temporarily unavailable. Polling-unit uploads remain visible.' });
-  }
-  let parsed = [];
-  try {
-    const responseText = body.candidates?.[0]?.content?.parts?.map(part => part.text || '').join('') || '';
-    const decoded = JSON.parse(responseText.replace(/^```json\s*|\s*```$/gi, '').trim());
-    parsed = Array.isArray(decoded) ? decoded : decoded?.results;
-  } catch {
-    parsed = [];
-  }
-  const results = (Array.isArray(parsed) ? parsed : [])
-    .map(item => ({ party: sanitizeString(item?.party || '').replace(/[^A-Za-z0-9&-]/g, '').trim().toUpperCase().slice(0, 12), votes: Number(item?.votes) }))
-    .filter(item => item.party && Number.isInteger(item.votes) && item.votes >= 0 && item.votes <= 5000)
-    .reduce((unique, item) => unique.some(existing => existing.party === item.party) ? unique : [...unique, item], []);
-  if (!results.length) return res.status(502).json({ message: 'No readable party vote counts were extracted from this image.' });
-  const extraction = { uploadId, results, provider: 'gemini', model: geminiVisionModel, sourceUrl: upload.imageUrl, extractedAt: new Date().toISOString() };
-  irevOcrCache.set(uploadId, extraction);
-  const persistenceTask = irevOcrPersistQueue.then(() => store.setSetting(IREV_OSUN_OCR_KEY, Object.fromEntries(irevOcrCache)));
-  irevOcrPersistQueue = persistenceTask.catch(error => console.error('[irev] Could not persist OCR result:', error.message));
-  await persistenceTask;
-  return res.json(extraction);
-}));
+app.get('/api/irev/osun/results', auth, rateLimit, (_req, res) => {
+  res.set('Cache-Control', 'private, max-age=3600');
+  return res.json(OSUN_2026_PUBLISHED_RESULTS);
+});
 app.use(['/api/news/summary', '/api/analysis/ai'], (req, _res, next) => { console.log(`[ai] request=${req.path} geminiConfigured=${Boolean(geminiApiKeys.length)} model=${process.env.GEMINI_MODEL || 'gemini-2.0-flash'}`); next(); });
 app.get('/api/ai/status', auth, adminOnly, rateLimit, (_, res) => {
   const providers = [groqApiKeys.length ? 'groq' : '', geminiApiKeys.length ? 'gemini' : '', process.env.OPENAI_API_KEY ? 'openai' : ''].filter(Boolean);
