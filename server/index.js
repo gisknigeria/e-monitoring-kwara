@@ -1084,6 +1084,8 @@ const IREV_IMAGE_HOSTS = new Set(['inc-s3-cache.incportals.com', 'etransmission-
 let irevOsunCache = null;
 const IREV_OSUN_ARCHIVE_KEY = 'irev_osun_archive_v1';
 let irevArchiveLoadPromise = null;
+let irevPollingStopped = false;
+let irevPollingStopReason = '';
 const ensureIrevArchiveLoaded = () => {
   if (!irevArchiveLoadPromise) irevArchiveLoadPromise = store.setting(IREV_OSUN_ARCHIVE_KEY, null).then(archive => {
     if (archive?.electionId === IREV_OSUN_ELECTION_ID && Array.isArray(archive.uploads)) {
@@ -1132,6 +1134,16 @@ const normalizeIrevUpload = item => {
 };
 const loadOsunIrevPilot = async (force = false) => {
   await ensureIrevArchiveLoaded();
+  if (irevPollingStopped && !force) {
+    if (irevOsunCache?.data) {
+      return { ...irevOsunCache.data, offline: true, refreshIntervalMs: 300_000, notice: 'Live IReV polling is paused. Showing the last Osun results saved on this server.' };
+    }
+    throw new Error(irevPollingStopReason || 'IReV polling is paused');
+  }
+  if (force && irevPollingStopped) {
+    irevPollingStopped = false;
+    irevPollingStopReason = '';
+  }
   if (!force && irevOsunCache?.expiresAt > Date.now()) return irevOsunCache.data;
   try {
     const [stats, allUnits] = await Promise.all([
@@ -1167,9 +1179,11 @@ const loadOsunIrevPilot = async (force = false) => {
     if (changed) await store.setSetting(IREV_OSUN_ARCHIVE_KEY, data);
     return data;
   } catch (error) {
+    irevPollingStopped = true;
+    irevPollingStopReason = error.message;
     if (irevOsunCache?.data?.uploads?.length) {
       console.warn('[irev] Live source unavailable; serving persistent archive:', error.message);
-      return { ...irevOsunCache.data, offline: true, refreshIntervalMs: 300_000, notice: 'Live IReV is unavailable. Showing the last Osun results saved on this server.' };
+      return { ...irevOsunCache.data, offline: true, refreshIntervalMs: 300_000, notice: 'Live IReV is unavailable. Automatic polling is paused. Showing the last Osun results saved on this server.' };
     }
     throw error;
   }
@@ -1942,7 +1956,10 @@ app.use((err, _, res, __) => {
 if (process.env.NODE_ENV === 'production') { app.use(express.static(join(__dirname, '..', 'dist'))); app.get(/.*/, (_, res) => res.sendFile(join(__dirname, '..', 'dist', 'index.html'))); }
 let irevInitialSyncTimer = null;
 let irevArchiveSyncTimer = null;
-const irevArchiveSync = () => loadOsunIrevPilot(true).catch(error => console.warn('[irev] Background Osun archive update failed:', error.message));
+const irevArchiveSync = () => {
+  if (irevPollingStopped) return;
+  return loadOsunIrevPilot(true).catch(error => console.warn('[irev] Background Osun archive update failed; automatic polling paused:', error.message));
+};
 irevInitialSyncTimer = setTimeout(irevArchiveSync, 2_000);
 irevInitialSyncTimer.unref?.();
 irevArchiveSyncTimer = setInterval(irevArchiveSync, 60_000);
