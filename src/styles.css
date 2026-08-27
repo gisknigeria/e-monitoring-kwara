@@ -4876,13 +4876,13 @@ body.resizing-sidebar {
   font-size: 16px !important;
 }
 .election-view-switcher .pre-election-open {
-  color: #22c55e;
+  color: #22c55e !important;
 }
 .election-view-switcher .result-center-open {
-  color: #f97316;
+  color: #f97316 !important;
 }
 .election-view-switcher .post-election-open {
-  color: #3b82f6;
+  color: #3b82f6 !important;
 }
 .election-view-switcher .election-view-open:hover {
   border-color: transparent;
@@ -7355,11 +7355,15 @@ body.resizing-sidebar {
 .nigeria-lga-tooltip {
   background: rgba(10, 18, 30, 0.95) !important;
   border: 1px solid #84cc16 !important;
-  color: #f0fdf4 !important;
+  color: #ffffff;
   font-size: 11px !important;
   font-weight: 700 !important;
   padding: 4px 10px !important;
   border-radius: 6px !important;
+}
+.nigeria-lga-tooltip strong,
+.nigeria-lga-tooltip span {
+  color: #ffffff !important;
 }
 
 /* ── Role-change panel in officer manager ── */

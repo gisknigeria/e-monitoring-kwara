@@ -1523,10 +1523,12 @@ function MapView({
             const status = performance?.status || (partyMapAnalysis?.party ? "no-data" : "");
             const statusLabel = status === "winning" ? "Winning" : status === "losing" ? "Losing" : status === "tied" ? "Tied" : status === "no-data" ? "No submitted result" : "";
             const margin = performance?.margin ? ` · margin ${Number(performance.margin).toLocaleString()}` : "";
-            const listedShareText = (performance?.listedShares || []).map((item) => `${escapeMapText(item.party)} ${Number(item.percentage || 0).toFixed(1)}%`).join(" · ");
-            const statewideShareText = (partyMapAnalysis?.partyShares || []).map((item) => `${escapeMapText(item.party)} ${Number(item.percentage || 0).toFixed(1)}%`).join(" · ");
+            const listedShareText = ["PDP", "APC"].map((party) => {
+              const share = (performance?.listedShares || []).find((item) => item.party === party);
+              return `${party} ${Number(share?.percentage || 0).toFixed(1)}%`;
+            }).join(" · ");
             const tooltip = partyMapAnalysis?.mode === "historical-sentiment" && performance
-              ? `<strong>${escapeMapText(name)}</strong><br><b>${escapeMapText(performance.winner)}</b> historical lead${escapeMapText(margin)}<br><span>LGA listed vote share: ${listedShareText}</span><br><span>State top 3 + Others: ${statewideShareText}</span><br><small>Only APC/PDP LGA totals are loaded. Click to open ward drill-down.</small>`
+              ? `<strong>${escapeMapText(name)}</strong><br><span>${listedShareText}</span>`
               : partyMapAnalysis?.party
               ? `<strong>${escapeMapText(name)}</strong><br>${escapeMapText(partyMapAnalysis.party)}: ${escapeMapText(statusLabel)}${escapeMapText(margin)}`
               : escapeMapText(name);
