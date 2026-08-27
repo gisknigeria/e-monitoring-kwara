@@ -4878,11 +4878,27 @@ body.resizing-sidebar {
 .election-view-switcher .pre-election-open {
   color: #22c55e !important;
 }
+.election-view-switcher .pre-election-open svg {
+  color: #22c55e !important;
+  filter: drop-shadow(0 0 5px #22c55e);
+}
 .election-view-switcher .result-center-open {
   color: #f97316 !important;
 }
+.election-view-switcher .result-center-open svg {
+  color: #f97316 !important;
+  filter: drop-shadow(0 0 5px #f97316);
+}
 .election-view-switcher .post-election-open {
   color: #3b82f6 !important;
+}
+.election-view-switcher .post-election-open svg {
+  color: #3b82f6 !important;
+  filter: drop-shadow(0 0 5px #3b82f6);
+}
+.election-view-switcher .election-view-open svg {
+  width: 22px;
+  height: 22px;
 }
 .election-view-switcher .election-view-open:hover {
   border-color: transparent;
