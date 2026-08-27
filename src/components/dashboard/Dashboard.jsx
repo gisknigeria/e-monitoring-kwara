@@ -2270,10 +2270,8 @@ function ResultsCenter({ incidents, parties = [], officers = [], personnel = [],
   const [irevCompareLoading, setIrevCompareLoading] = useState(false);
   const [fieldMismatchDetail, setFieldMismatchDetail] = useState(null);
   useEffect(() => {
-    if (view !== "news" || news.length) return;
-    setNewsLoading(true);
-    request("/news?q=Kwara State politics INEC elections parties security SBK PDP governorship 2027", authToken).then(data => setNews(data.articles || [])).catch(error => { setNews([]); setNewsError(error.message || "News service unavailable"); }).finally(() => setNewsLoading(false));
-  }, [view, news.length]);
+    if (view === "news") setView("pulse");
+  }, [view]);
   const loadIrevPilot = async (force = false) => {
     setIrevLoading(true);
     setIrevError("");
@@ -2641,7 +2639,7 @@ function ResultsCenter({ incidents, parties = [], officers = [], personnel = [],
         <div>
           <span className="eyebrow">INTELLIGENCE DASHBOARD</span>
           <h1>Analytics Dashboard</h1>
-          <p>Live operational pulse, election results, actions, and news.</p>
+          <p>Live operational pulse, election results, and actions.</p>
         </div>
         <button className="icon-btn" onClick={onClose} title="Close dashboard"><FaTimes /></button>
       </header>

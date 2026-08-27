@@ -13,6 +13,9 @@
 .mobile-close {
   display: none;
 }
+.results-center > .rc-tab-bar > .rc-tab:last-child {
+  display: none;
+}
 .app-loading {
   min-height: 100vh;
   display: grid;

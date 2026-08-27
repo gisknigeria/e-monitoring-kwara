@@ -80,7 +80,7 @@ export default function ResultsDashboard({
         <div>
           <span className="eyebrow">INTELLIGENCE DASHBOARD</span>
           <h1>Analytics Dashboard</h1>
-          <p>Live operational pulse, election results, actions, and news.</p>
+          <p>Live operational pulse, election results, and actions.</p>
         </div>
         <button className="icon-btn" onClick={onClose} title="Close dashboard">
           <FaTimes />

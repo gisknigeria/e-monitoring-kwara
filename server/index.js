@@ -1993,7 +1993,7 @@ let irevInitialSyncTimer = null;
 let irevArchiveSyncTimer = null;
 const irevArchiveSync = () => {
   if (irevPollingStopped) return;
-  return loadOsunIrevPilot(true).catch(error => console.warn('[irev] Background Osun archive update failed; automatic polling paused:', error.message));
+  return loadOsunIrevPilot().catch(error => console.warn('[irev] Background Osun archive update failed; automatic polling paused:', error.message));
 };
 irevInitialSyncTimer = setTimeout(irevArchiveSync, 2_000);
 irevInitialSyncTimer.unref?.();
