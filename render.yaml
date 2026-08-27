@@ -5,6 +5,14 @@ services:
     plan: starter
     region: frankfurt
     dockerfilePath: ./Dockerfile
+    buildFilter:
+      paths:
+        - server/**
+        - shared/**
+        - package.json
+        - package-lock.json
+        - Dockerfile
+        - render.yaml
     healthCheckPath: /api/health
     envVars:
       - key: NODE_ENV
@@ -16,7 +24,7 @@ services:
       # Must match the public Render URL so browser requests are not accepted
       # from arbitrary origins. Override this value if the service name changes.
       - key: CORS_ORIGIN
-        value: https://e-monitoring-kwara.onrender.com
+        value: https://e-monitoring-kwara.onrender.com,https://e-monitoring-kwara.vercel.app
       - key: DATABASE_URL
         sync: false
       - key: ADMIN_EMAIL

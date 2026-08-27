@@ -19,12 +19,14 @@ The frontend can be deployed separately to Vercel while the existing Express and
 4. In Render, set:
 
    ```env
-   CORS_ORIGIN=https://your-vercel-project.vercel.app
+   CORS_ORIGIN=https://e-monitoring-kwara.onrender.com,https://e-monitoring-kwara.vercel.app
    ```
 
-   If you use a custom frontend domain, use that exact `https://` origin instead. Redeploy or restart Render after changing it.
+   If you use a custom frontend domain, add it as another comma-separated origin. Redeploy or restart Render after changing it.
 
 The Vercel deployment hosts only the built frontend. The Render service must stay online for login, data, AI analysis, live updates, camera signaling and other API features. Keep `DATABASE_URL`, `ADMIN_PASSWORD`, `SUPER_ADMIN_PASSWORD`, `JWT_SECRET`, and any optional AI or TURN values in Render; they do not belong in Vercel.
+
+The Render Blueprint uses a build filter. Changes only inside `src/`, `public/`, or Vercel configuration will not trigger a Render deployment. Changes to `server/`, `shared/`, dependencies, `Dockerfile`, or `render.yaml` still trigger one. After changing the Blueprint, confirm the service's Auto-Deploy setting is enabled; Render will apply the filter to future commits.
 
 ## Render deployment (recommended for this repository)
 
