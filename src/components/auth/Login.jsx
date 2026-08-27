@@ -1,7 +1,6 @@
 import { useState } from "react";
 import { FaEye, FaEyeSlash } from "react-icons/fa";
-
-const API = "/api";
+import { API } from "../../config.js";
 
 const safeApiErrorMessage = (status, body, contentType = "") => {
   const message = typeof body === "object" && body

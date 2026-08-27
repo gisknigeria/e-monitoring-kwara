@@ -1,5 +1,31 @@
 # Live deployment
 
+## Vercel frontend with Render backend
+
+The frontend can be deployed separately to Vercel while the existing Express and Socket.IO server remains on Render.
+
+1. Deploy the repository to Vercel with these project settings:
+   - Framework preset: `Vite`
+   - Build command: `npm run build`
+   - Output directory: `dist`
+2. In Vercel project settings, add this environment variable for Production (and Preview if needed):
+
+   ```env
+   VITE_API_URL=https://your-render-service.onrender.com
+   ```
+
+   Use the backend origin only, without a trailing slash or `/api`.
+3. Deploy the Vercel project and copy its public URL.
+4. In Render, set:
+
+   ```env
+   CORS_ORIGIN=https://your-vercel-project.vercel.app
+   ```
+
+   If you use a custom frontend domain, use that exact `https://` origin instead. Redeploy or restart Render after changing it.
+
+The Vercel deployment hosts only the built frontend. The Render service must stay online for login, data, AI analysis, live updates, camera signaling and other API features. Keep `DATABASE_URL`, `ADMIN_PASSWORD`, `SUPER_ADMIN_PASSWORD`, `JWT_SECRET`, and any optional AI or TURN values in Render; they do not belong in Vercel.
+
 ## Render deployment (recommended for this repository)
 
 1. Commit and push the included `render.yaml` and `Dockerfile` to the repository.

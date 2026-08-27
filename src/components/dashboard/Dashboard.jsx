@@ -3,6 +3,7 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { lazy, Suspense } from "react";
 import L from "leaflet";
 import { io } from "socket.io-client";
+import { API, API_BASE_URL } from "../../config.js";
 import {
   FaBullseye,
   FaCamera,
@@ -99,7 +100,6 @@ const OfficerManager = lazy(() => loadFieldModals().then((module) => ({ default:
 const PartyManager = lazy(() => loadFieldModals().then((module) => ({ default: module.PartyManager })));
 const PollingResultForm = lazy(() => loadFieldModals().then((module) => ({ default: module.PollingResultForm })));
 
-const API = "/api";
 const OYO_CENTER = [8.4799, 4.5418];
 const OYO_BOUNDS = [
   [7.75, 2.72],
@@ -3122,7 +3122,7 @@ function Dashboard({ session, onLogout, onSessionUpdate }) {
           setNotice(err.message);
         }
       });
-    const socket = io({
+    const socket = io(API_BASE_URL || undefined, {
       transports: ["polling", "websocket"],
       auth: { token: session.token },
       reconnectionAttempts: 10,

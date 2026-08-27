@@ -2,8 +2,8 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import L from "leaflet";
 import { FaMapMarkedAlt, FaTimes } from "react-icons/fa";
 import { MdAdjust, MdFilterHdr, MdHexagon, MdImage, MdLocationPin, MdPolyline } from "react-icons/md";
+import { API } from "../../config.js";
 
-const API = "/api";
 const OYO_CENTER = [8.4799, 4.5418];
 
 const CATEGORY_ICON_COMPONENTS = {

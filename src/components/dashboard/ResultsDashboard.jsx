@@ -1,6 +1,7 @@
 import { useMemo, useState } from "react";
 import { FaChartBar, FaTimes, FaSyncAlt } from "react-icons/fa";
 import { MdFlashOn } from "react-icons/md";
+import { API } from "../../config.js";
 
 const POLLING_RESULT_TYPE = "Polling Unit Result";
 
@@ -144,7 +145,7 @@ export default function ResultsDashboard({
                   onClick={async () => {
                     setOutlookLoading(true);
                     try {
-                      const result = await fetch("/api/analysis/ai", {
+                      const result = await fetch(`${API}/analysis/ai`, {
                         method: "POST",
                         headers: { "Content-Type": "application/json", Authorization: `Bearer ${authToken}` },
                         body: JSON.stringify({ focusParty, incidents }),
