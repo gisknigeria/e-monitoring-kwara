@@ -1,6 +1,7 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { FaEye, FaEyeSlash } from "react-icons/fa";
 import { API } from "../../config.js";
+import { getInstallState, requestAppInstall, subscribeToInstallState } from "../../pwaInstall.js";
 
 const safeApiErrorMessage = (status, body, contentType = "") => {
   const message = typeof body === "object" && body
@@ -49,9 +50,25 @@ export default function Login({ onLogin }) {
   const [showPassword, setShowPassword] = useState(false);
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
+  const [installState, setInstallState] = useState(getInstallState);
+  const [installMessage, setInstallMessage] = useState("");
 
-  const installApp = () => {
-    setError("Use your browser menu and choose Install app / Add to Home screen.");
+  useEffect(() => subscribeToInstallState(setInstallState), []);
+
+  const installApp = async () => {
+    setInstallMessage("");
+    const result = await requestAppInstall();
+
+    if (result.status === "accepted")
+      setInstallMessage("Installation started. The app will appear on your device shortly.");
+    else if (result.status === "installed")
+      setInstallMessage("The app is already installed on this device.");
+    else if (result.status === "dismissed")
+      setInstallMessage("Installation was cancelled. Reload the page when ready, then press Install again.");
+    else if (result.status === "ios-help")
+      setInstallMessage("On iPhone or iPad: tap Share, then choose Add to Home Screen.");
+    else
+      setInstallMessage("Install is not available yet. Use a secure HTTPS page in Chrome or Edge, then try again.");
   };
 
   const submit = async (e) => {
@@ -137,8 +154,10 @@ export default function Login({ onLogin }) {
         </button>
 
         <button type="button" className="install-login" onClick={installApp}>
-          Install command center app
+          {installState.installed ? "App installed" : installState.canPrompt ? "Install command center app" : "Install app"}
         </button>
+
+        {installMessage && <div className="install-status" role="status">{installMessage}</div>}
 
         <p className="powered-by">E-Monitoring Kwara</p>
       </form>

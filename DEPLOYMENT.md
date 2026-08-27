@@ -11,7 +11,7 @@ The frontend can be deployed separately to Vercel while the existing Express and
 2. In Vercel project settings, add this environment variable for Production (and Preview if needed):
 
    ```env
-   VITE_API_URL=https://your-render-service.onrender.com
+   VITE_API_URL=https://e-monitoring-kwara-l60u.onrender.com
    ```
 
    Use the backend origin only, without a trailing slash or `/api`.
@@ -19,7 +19,7 @@ The frontend can be deployed separately to Vercel while the existing Express and
 4. In Render, set:
 
    ```env
-   CORS_ORIGIN=https://e-monitoring-kwara.onrender.com,https://e-monitoring-kwara.vercel.app
+   CORS_ORIGIN=https://e-monitoring-kwara-l60u.onrender.com,https://e-monitoring-kwara.vercel.app
    ```
 
    If you use a custom frontend domain, add it as another comma-separated origin. Redeploy or restart Render after changing it.

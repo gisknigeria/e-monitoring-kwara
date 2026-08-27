@@ -1942,6 +1942,16 @@ header {
   padding: 12px 18px;
   font-weight: 700;
 }
+.install-status {
+  margin-top: 10px;
+  border: 1px solid #2f855a;
+  border-radius: 7px;
+  background: #0b2b1a;
+  color: #dcfce7;
+  padding: 10px 12px;
+  font-size: 12px;
+  line-height: 1.45;
+}
 .tools-modal {
   width: min(620px, 94vw);
 }
