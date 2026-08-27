@@ -1476,7 +1476,21 @@ function MapView({
         pane: "overlayPane",
         style: (feature) => {
           const name = feature.properties?.ADM2_EN || feature.properties?.lga_name || feature.properties?.LGA || feature.properties?.lga || feature.properties?.LTNAME || feature.properties?.name || "";
-          const status = partyLgaResults[normalizeLgaMatch(name)]?.status || (partyMapAnalysis?.party ? "no-data" : "");
+          const performance = partyLgaResults[normalizeLgaMatch(name)];
+          if (partyMapAnalysis?.mode === "historical-sentiment" && performance) {
+            const winnerValue = Number(performance.winnerValue || 0);
+            const runnerUpValue = Number(performance.runnerUpValue || 0);
+            const strength = winnerValue ? Math.min(1, Math.max(0.2, (winnerValue - runnerUpValue) / winnerValue)) : 0.25;
+            return {
+              color: performance.color || "#94a3b8",
+              weight: 3.5,
+              dashArray: "",
+              fillOpacity: 0.3 + (strength * 0.4),
+              fillColor: performance.color || "#94a3b8",
+              opacity: 1,
+            };
+          }
+          const status = performance?.status || (partyMapAnalysis?.party ? "no-data" : "");
           const colors = {
             winning: { line: "#16a34a", fill: "#22c55e" },
             losing: { line: "#dc2626", fill: "#ef4444" },
@@ -1507,7 +1521,9 @@ function MapView({
             const status = performance?.status || (partyMapAnalysis?.party ? "no-data" : "");
             const statusLabel = status === "winning" ? "Winning" : status === "losing" ? "Losing" : status === "tied" ? "Tied" : status === "no-data" ? "No submitted result" : "";
             const margin = performance?.margin ? ` · margin ${Number(performance.margin).toLocaleString()}` : "";
-            const tooltip = partyMapAnalysis?.party
+            const tooltip = partyMapAnalysis?.mode === "historical-sentiment" && performance
+              ? `<strong>${escapeMapText(name)}</strong><br><b>${escapeMapText(performance.winner)}</b> historical lead${escapeMapText(margin)}<br>${Number(performance.winnerValue || 0).toLocaleString()} vs ${escapeMapText(performance.runnerUp)} ${Number(performance.runnerUpValue || 0).toLocaleString()}<br><small>Click to open ward drill-down</small>`
+              : partyMapAnalysis?.party
               ? `<strong>${escapeMapText(name)}</strong><br>${escapeMapText(partyMapAnalysis.party)}: ${escapeMapText(statusLabel)}${escapeMapText(margin)}`
               : escapeMapText(name);
             layerGeo.bindTooltip(tooltip, { permanent: false, sticky: true, className: "nigeria-lga-tooltip" });
@@ -2245,8 +2261,8 @@ function AnalyticsPanel({
   );
 }
 
-function ResultsCenter({ incidents, parties = [], officers = [], personnel = [], mapLayers = [], selected, onClose, authToken, canAdmin = false, initialFocusParty = "", onPartyMapChange, onFocusLocation, onTool, onCsv, onClear }) {
-  const [view, setView] = useState("pulse");
+function ResultsCenter({ incidents, parties = [], officers = [], personnel = [], mapLayers = [], selected, onClose, authToken, canAdmin = false, initialView = "pulse", initialFocusParty = "", initialElectionSelection = null, onPartyMapChange, onShowHistoricalMap, onFocusLocation, onTool, onCsv, onClear }) {
+  const [view, setView] = useState(initialView);
   const [resultSourceFilter, setResultSourceFilter] = useState("");
   const [focusParty, setFocusParty] = useState(initialFocusParty);
   const [outlook, setOutlook] = useState("");
@@ -2633,20 +2649,26 @@ function ResultsCenter({ incidents, parties = [], officers = [], personnel = [],
     method: "POST",
     body: JSON.stringify({ context }),
   });
+  const dedicatedElectionView = view === "pre" || view === "post";
+  const dashboardHeading = view === "pre"
+    ? { eyebrow: "PRE-ELECTION INTELLIGENCE", title: "Pre-Election Dashboard", copy: "Historical results, comparisons and readiness analysis before election day." }
+    : view === "post"
+      ? { eyebrow: "POST-ELECTION INTELLIGENCE", title: "Post-Election Dashboard", copy: "Evidence readiness, submitted results, field performance and operational lessons." }
+      : { eyebrow: "INTELLIGENCE DASHBOARD", title: "Analytics Dashboard", copy: "Live operational pulse, election results, and actions." };
   return (
     <div className="results-center">
       <header className="results-center-head">
         <div>
-          <span className="eyebrow">INTELLIGENCE DASHBOARD</span>
-          <h1>Analytics Dashboard</h1>
-          <p>Live operational pulse, election results, and actions.</p>
+          <span className="eyebrow">{dashboardHeading.eyebrow}</span>
+          <h1>{dashboardHeading.title}</h1>
+          <p>{dashboardHeading.copy}</p>
         </div>
         <button className="icon-btn" onClick={onClose} title="Close dashboard"><FaTimes /></button>
       </header>
-      <div className="rc-tab-bar"><button className={view === "pulse" ? "rc-tab active" : "rc-tab"} onClick={() => setView("pulse")}>Pulse</button><button className={view === "action" ? "rc-tab active" : "rc-tab"} onClick={() => setView("action")}>Action</button><button className={["breakdown", "winloss", "winloss-lga"].includes(view) ? "rc-tab active" : "rc-tab"} onClick={() => setView("breakdown")}>Result</button><button className={view === "pre" ? "rc-tab active" : "rc-tab"} onClick={() => setView("pre")}>Pre-Election</button><button className={view === "post" ? "rc-tab active" : "rc-tab"} onClick={() => setView("post")}>Post-Election</button><button className={view === "irev" ? "rc-tab active" : "rc-tab"} onClick={() => setView("irev")}>IReV</button><button className={view === "news" ? "rc-tab active" : "rc-tab"} onClick={() => setView("news")}>News</button></div>
+      {!dedicatedElectionView && <div className="rc-tab-bar"><button className={view === "pulse" ? "rc-tab active" : "rc-tab"} onClick={() => setView("pulse")}>Pulse</button><button className={view === "action" ? "rc-tab active" : "rc-tab"} onClick={() => setView("action")}>Action</button><button className={["breakdown", "winloss", "winloss-lga"].includes(view) ? "rc-tab active" : "rc-tab"} onClick={() => setView("breakdown")}>Result</button><button className={view === "irev" ? "rc-tab active" : "rc-tab"} onClick={() => setView("irev")}>IReV</button><button className={view === "news" ? "rc-tab active" : "rc-tab"} onClick={() => setView("news")}>News</button></div>}
       <main className="results-center-body">
         {view === "pulse" && <AnalyticsPanel incidents={incidents} officers={officers} mapLayers={mapLayers} selected={selected} onClose={onClose} onTool={onTool} onCsv={onCsv} onClear={onClear} embedded />}
-        {view === "pre" && <PreElectionAnalysis onAnalyze={runPreElectionAnalysis} />}
+        {view === "pre" && <PreElectionAnalysis onAnalyze={runPreElectionAnalysis} initialSelection={initialElectionSelection} onShowMap={onShowHistoricalMap} />}
         {["breakdown", "winloss", "winloss-lga"].includes(view) && <div className="wl-sub-tabs result-view-tabs"><button className={view === "breakdown" ? "wl-sub-tab active" : "wl-sub-tab"} onClick={() => setView("breakdown")}>Polling Unit Breakdown</button><button className={view !== "breakdown" ? "wl-sub-tab active" : "wl-sub-tab"} onClick={() => setView("winloss")}>Win / Loss Analysis</button></div>}
         {["winloss", "winloss-lga"].includes(view) && <section className="result-total-strip"><article className="result-total-card grand"><span>Current projection</span><strong>{forecast.leader || "—"}</strong><small>{forecast.confidence}% indicative confidence; not a final result</small></article><article className="result-total-card"><span>Vote margin</span><strong>{forecast.margin.toLocaleString()}</strong><small>Against second place</small></article><article className="result-total-card"><span>Units covered</span><strong>{forecast.coverage.toLocaleString()}</strong><small>Unique submitted units</small></article></section>}
         {view === "news" && <section className="result-table-card"><div className="result-table-title"><div><h2>Kwara State News</h2><p>General Kwara State coverage, including politics, INEC, elections, parties, governance, security, and major local developments.</p></div><div className="analysis-actions news-actions"><button className="primary action-btn refresh-news-btn" onClick={() => { setNews([]); setNewsSummary(""); setNewsSummaryError(""); setView("news"); }}><FaSyncAlt /> <span>Refresh</span></button><button className="secondary action-btn summary-action-btn" disabled={!news.length || newsSummaryLoading} onClick={() => { setNewsSummaryLoading(true); setNewsSummaryError(""); request("/news/summary", authToken, { method: "POST", body: JSON.stringify({ articles: news }) }).then((x) => { setNewsSummary(x.summary || "No summary available yet."); if (x.provider === "local") setNewsSummaryError("The summary service was unavailable, so a local fallback was generated."); else setNewsSummaryError(""); }).catch((error) => { setNewsSummary(""); setNewsSummaryError(error.message || "The summary request failed."); }).finally(() => setNewsSummaryLoading(false)); }}><MdFlashOn /> <span>{newsSummaryLoading ? "Working…" : "Summary"}</span></button></div></div>{newsSummary && <div className="news-summary">{cleanSummaryText(newsSummary)}</div>}{newsSummaryError && <p className="muted">{newsSummaryError}</p>}{newsLoading ? <p>Loading current headlines…</p> : <div className="news-list">{news.map(item => <article className="news-item" key={item.url}><a href={item.url} target="_blank" rel="noreferrer"><h3>{item.title}</h3></a><small>{item.source} · {item.publishedAt ? new Date(item.publishedAt).toLocaleString() : "Recent"}</small></article>)}{!news.length && <p>No current Kwara State headlines available.</p>}</div>}</section>}
@@ -2808,7 +2830,9 @@ function Dashboard({ session, onLogout, onSessionUpdate }) {
   const [mapDataPanel, setMapDataPanel] = useState(false);
   const [focusedOfficerId, setFocusedOfficerId] = useState("");
   const [resultsOpen, setResultsOpen] = useState(false);
+  const [resultsInitialView, setResultsInitialView] = useState("pulse");
   const [partyMapAnalysis, setPartyMapAnalysis] = useState(null);
+  const [preElectionSelection, setPreElectionSelection] = useState(null);
   const [analysisLayers, setAnalysisLayers] = useState([]);
   const [pendingAreaAction, setPendingAreaAction] = useState(null);
   const [areaSearchResult, setAreaSearchResult] = useState(null);
@@ -5131,6 +5155,33 @@ function Dashboard({ session, onLogout, onSessionUpdate }) {
     setNotice("Connecting to live phone camera...");
     setTimeout(() => setNotice(""), 5000);
   };
+  const openResultsView = (view) => {
+    if (view === "pre") setPreElectionSelection(null);
+    setResultsInitialView(view);
+    setResultsOpen(true);
+  };
+  const showHistoricalSentimentMap = (analysis) => {
+    setPartyMapAnalysis(analysis);
+    setShowLgaBorders(true);
+    setShowBoundaryNames(true);
+    setResultsOpen(false);
+    setTimeout(() => mapRef.current?.fitBounds(OYO_BOUNDS), 100);
+    setNotice("2023 governorship sentiment shown by LGA. Select an LGA to drill into wards.");
+    setTimeout(() => setNotice(""), 5000);
+  };
+  const handleBoundarySelection = (id, label) => {
+    setSelectedBoundaryState(id);
+    setSelectedBoundaryLabel(label);
+    if (partyMapAnalysis?.mode !== "historical-sentiment") return;
+    const matchedLga = Object.keys(partyMapAnalysis.byLga || {}).find((name) =>
+      String(name).trim().toLowerCase().replace(/[^a-z0-9]+/g, " ").trim()
+      === String(label).trim().toLowerCase().replace(/[^a-z0-9]+/g, " ").trim(),
+    );
+    if (!matchedLga) return;
+    setPreElectionSelection({ lga: matchedLga });
+    setResultsInitialView("pre");
+    setResultsOpen(true);
+  };
   const mapCameras = useMemo(
     () => [
       ...cameras.map((c) => ({ ...c, feedType: c.type || "CCTV" })),
@@ -5696,14 +5747,29 @@ function Dashboard({ session, onLogout, onSessionUpdate }) {
             >
               Result
             </button>}
-            <button
-              className="map-action result-center-open icon-only"
-              onClick={() => setResultsOpen(true)}
-              title="Dashboard"
-              aria-label="Dashboard"
-            >
-              <FaChartBar />
-            </button>
+            <div className="election-view-switcher" aria-label="Election intelligence views">
+              <button
+                className="map-action election-view-open pre-election-open"
+                onClick={() => openResultsView("pre")}
+                title="Open pre-election dashboard"
+              >
+                Pre-Election
+              </button>
+              <button
+                className="map-action election-view-open result-center-open"
+                onClick={() => openResultsView("pulse")}
+                title="Open analytics dashboard"
+              >
+                <FaChartBar /> Dashboard
+              </button>
+              <button
+                className="map-action election-view-open post-election-open"
+                onClick={() => openResultsView("post")}
+                title="Open post-election dashboard"
+              >
+                Post-Election
+              </button>
+            </div>
             <button
               className={`map-action emergency-open ${sosHolding ? "sos-holding" : ""}`}
               {...sosHoldProps}
@@ -5867,10 +5933,7 @@ function Dashboard({ session, onLogout, onSessionUpdate }) {
               showBoundaryNames={showBoundaryNames}
               partyMapAnalysis={partyMapAnalysis}
               selectedBoundaryState={selectedBoundaryState}
-              onBoundarySelect={(id, label) => {
-                setSelectedBoundaryState(id);
-                setSelectedBoundaryLabel(label);
-              }}
+              onBoundarySelect={handleBoundarySelection}
               onBoundaryClear={clearBoundarySelection}
               focusedOfficerId={focusedOfficerId}
               onClearOfficerFocus={setFocusedOfficerId}
@@ -5913,10 +5976,7 @@ function Dashboard({ session, onLogout, onSessionUpdate }) {
           showBoundaryNames={showBoundaryNames}
           partyMapAnalysis={partyMapAnalysis}
           selectedBoundaryState={selectedBoundaryState}
-          onBoundarySelect={(id, label) => {
-            setSelectedBoundaryState(id);
-            setSelectedBoundaryLabel(label);
-          }}
+          onBoundarySelect={handleBoundarySelection}
           onBoundaryClear={clearBoundarySelection}
           focusedOfficerId={focusedOfficerId}
           onClearOfficerFocus={setFocusedOfficerId}
@@ -6188,7 +6248,7 @@ function Dashboard({ session, onLogout, onSessionUpdate }) {
           />
         </Suspense>
       )}
-      {resultsOpen && <ResultsCenter incidents={incidents} parties={parties} officers={officers} personnel={users} mapLayers={mapLayers} selected={selected} onClose={() => setResultsOpen(false)} authToken={session.token} canAdmin={canAdmin} initialFocusParty={partyMapAnalysis?.party || ""} onPartyMapChange={setPartyMapAnalysis} onFocusLocation={(item) => { setResultsOpen(false); setSelected(null); setCoords(`${item.lat.toFixed(6)}, ${item.lng.toFixed(6)}`); mapRef.current?.flyTo([item.lat, item.lng], 15); }} onTool={runAnalyticTool} onCsv={importCsvPoints} onClear={clearMapTools} />}
+      {resultsOpen && <ResultsCenter incidents={incidents} parties={parties} officers={officers} personnel={users} mapLayers={mapLayers} selected={selected} onClose={() => setResultsOpen(false)} authToken={session.token} canAdmin={canAdmin} initialView={resultsInitialView} initialFocusParty={partyMapAnalysis?.party || ""} initialElectionSelection={preElectionSelection} onPartyMapChange={setPartyMapAnalysis} onShowHistoricalMap={showHistoricalSentimentMap} onFocusLocation={(item) => { setResultsOpen(false); setSelected(null); setCoords(`${item.lat.toFixed(6)}, ${item.lng.toFixed(6)}`); mapRef.current?.flyTo([item.lat, item.lng], 15); }} onTool={runAnalyticTool} onCsv={importCsvPoints} onClear={clearMapTools} />}
       {pendingAreaAction && (
         <div className="modal-backdrop">
           <section className="modal area-action-modal">
