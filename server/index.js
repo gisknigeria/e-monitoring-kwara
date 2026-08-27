@@ -59,8 +59,33 @@ const adminPassword = process.env.ADMIN_PASSWORD || randomBytes(24).toString('he
 const meteredDomain = normalizeMeteredDomain(process.env.METERED_DOMAIN);
 const meteredTurnApiKey = String(process.env.METERED_TURN_API_KEY || '').trim();
 const meteredTurnRegion = normalizeMeteredRegion(process.env.METERED_TURN_REGION);
+const cloudflareTurnUrls = String(process.env.CLOUDFLARE_TURN_URLS || '')
+  .split(',')
+  .map(value => value.trim())
+  .filter(Boolean);
+const cloudflareTurnUsername = String(process.env.CLOUDFLARE_TURN_USERNAME || '').trim();
+const cloudflareTurnCredential = String(process.env.CLOUDFLARE_TURN_CREDENTIAL || '').trim();
+const cloudflareTurnServers = sanitizeIceServers(cloudflareTurnUrls.map(url => ({
+  urls: url,
+  username: cloudflareTurnUsername,
+  credential: cloudflareTurnCredential,
+})));
+const expressTurnUrls = String(process.env.EXPRESSTURN_URLS || '')
+  .split(',')
+  .map(value => value.trim())
+  .filter(Boolean);
+const expressTurnUsername = String(process.env.EXPRESSTURN_USERNAME || '').trim();
+const expressTurnCredential = String(process.env.EXPRESSTURN_CREDENTIAL || '').trim();
+const expressTurnServers = sanitizeIceServers(expressTurnUrls.map(url => ({
+  urls: url,
+  username: expressTurnUsername,
+  credential: expressTurnCredential,
+})));
 if ((process.env.METERED_DOMAIN || process.env.METERED_TURN_API_KEY) && (!meteredDomain || !meteredTurnApiKey)) {
   console.warn('Metered TURN is not fully configured. Live video will use the STUN fallback.');
+}
+if (expressTurnUrls.length && (!expressTurnUsername || !expressTurnCredential || !expressTurnServers.length)) {
+  console.warn('ExpressTURN is not fully configured. Live video will use the configured STUN fallback.');
 }
 if (!process.env.SUPER_ADMIN_PASSWORD || !process.env.ADMIN_PASSWORD) {
   console.warn('SUPER_ADMIN_PASSWORD and ADMIN_PASSWORD were not set. Generated secure random passwords for the seeded admin accounts.');
@@ -1009,7 +1034,10 @@ let turnCredentialCache = null;
 app.get('/api/turn/credentials', auth, rateLimit, asyncRoute(async (_req, res) => {
   if (!meteredDomain || !meteredTurnApiKey) {
     res.set('Cache-Control', 'private, no-store');
-    return res.json({ iceServers: FALLBACK_ICE_SERVERS, provider: 'stun-fallback' });
+    return res.json({
+      iceServers: [FALLBACK_ICE_SERVERS[0], ...cloudflareTurnServers, ...expressTurnServers, FALLBACK_ICE_SERVERS[1]],
+      provider: cloudflareTurnServers.length ? 'cloudflare' : expressTurnServers.length ? 'expressturn' : 'stun-fallback',
+    });
   }
   res.set('Cache-Control', 'private, max-age=240');
   res.set('Vary', 'Authorization');
@@ -1026,13 +1054,20 @@ app.get('/api/turn/credentials', auth, rateLimit, asyncRoute(async (_req, res) =
       const urls = Array.isArray(server.urls) ? server.urls : [server.urls];
       return urls.some(url => /^turns?:/i.test(url));
     })) throw new Error('Metered returned no usable TURN servers');
-    const data = { iceServers, provider: 'metered', region: meteredTurnRegion };
+    const data = {
+      iceServers: [FALLBACK_ICE_SERVERS[0], ...cloudflareTurnServers, ...expressTurnServers, ...iceServers, FALLBACK_ICE_SERVERS[1]],
+      provider: 'metered',
+      region: meteredTurnRegion,
+    };
     turnCredentialCache = { data, expiresAt: Date.now() + 5 * 60 * 1000 };
     return res.json(data);
   } catch (error) {
     console.error('[turn] Metered credential fetch failed:', error.message);
     res.set('Cache-Control', 'private, no-store');
-    const data = { iceServers: FALLBACK_ICE_SERVERS, provider: 'stun-fallback' };
+    const data = {
+      iceServers: [FALLBACK_ICE_SERVERS[0], ...cloudflareTurnServers, ...expressTurnServers, FALLBACK_ICE_SERVERS[1]],
+      provider: cloudflareTurnServers.length ? 'cloudflare' : expressTurnServers.length ? 'expressturn' : 'stun-fallback',
+    };
     turnCredentialCache = { data, expiresAt: Date.now() + 5 * 60 * 1000 };
     return res.json(data);
   }

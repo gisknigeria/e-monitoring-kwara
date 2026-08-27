@@ -221,15 +221,18 @@ export default function CameraPanel({
     Drone: cameraFeeds.filter((x) => x.feedType === "Drone").length,
   };
 
+  const relayName = turnStatus?.provider === "cloudflare"
+    ? "Cloudflare TURN"
+    : turnStatus?.provider === "expressturn"
+      ? "ExpressTURN"
+      : "Metered TURN";
   const turnStatusLabel = turnStatus?.route === "turn"
-    ? "Connected via Metered TURN"
-    : turnStatus?.provider === "metered" && turnStatus?.route === "direct"
-      ? "Metered ready · direct route"
-      : turnStatus?.provider === "metered"
-        ? `Metered TURN ready${turnStatus?.region ? ` · ${turnStatus.region}` : ""}`
-        : turnStatus?.provider === "stun-fallback"
-          ? "STUN fallback only"
-          : "Checking TURN";
+    ? `Connected via ${relayName}`
+    : turnStatus?.provider !== "stun-fallback" && turnStatus?.route === "direct"
+      ? `${relayName} ready · direct route`
+      : turnStatus?.provider !== "stun-fallback"
+        ? `${relayName} ready${turnStatus?.region ? ` · ${turnStatus.region}` : ""}`
+        : "STUN fallback only";
 
   useEffect(() => {
     if (!isAdmin) return;
@@ -379,7 +382,7 @@ export default function CameraPanel({
           <h2>{view === "Drone" ? "Drone view" : "Camera feeds"}</h2>
         </div>
         <div className="camera-head-actions">
-          <span className={`turn-status ${turnStatus?.route === "turn" ? "relayed" : turnStatus?.provider === "metered" ? "ready" : "fallback"}`}>
+          <span className={`turn-status ${turnStatus?.route === "turn" ? "relayed" : turnStatus?.provider !== "stun-fallback" ? "ready" : "fallback"}`}>
             {turnStatusLabel}
           </span>
           <button className="icon-btn" onClick={onClose}>

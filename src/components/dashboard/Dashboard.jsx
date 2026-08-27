@@ -3180,7 +3180,7 @@ function Dashboard({ session, onLogout, onSessionUpdate }) {
         const iceServers = Array.isArray(result?.iceServers) && result.iceServers.length
           ? result.iceServers
           : fallbackIceServers;
-        setTurnStatus({ provider, region, route: provider === "metered" ? "ready" : "fallback" });
+        setTurnStatus({ provider, region, route: ["metered", "cloudflare", "expressturn"].includes(provider) ? "ready" : "fallback" });
         return { iceServers, provider, region };
       })
       .catch((error) => {

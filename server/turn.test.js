@@ -29,5 +29,6 @@ test('sanitizes ICE server responses without dropping TURN credentials', () => {
     { urls: 'stun:stun.relay.metered.ca:80' },
     { urls: 'turn:global.relay.metered.ca:443?transport=tcp', username: 'user', credential: 'pass' },
   ]);
-  assert.equal(FALLBACK_ICE_SERVERS[0].urls, 'stun:stun.l.google.com:19302');
+  assert.equal(FALLBACK_ICE_SERVERS[0].urls, 'stun:stun.cloudflare.com:3478');
+  assert.equal(FALLBACK_ICE_SERVERS[1].urls, 'stun:stun.l.google.com:19302');
 });

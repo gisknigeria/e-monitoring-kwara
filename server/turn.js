@@ -1,4 +1,5 @@
 export const FALLBACK_ICE_SERVERS = Object.freeze([
+  Object.freeze({ urls: 'stun:stun.cloudflare.com:3478' }),
   Object.freeze({ urls: 'stun:stun.l.google.com:19302' }),
 ]);
 

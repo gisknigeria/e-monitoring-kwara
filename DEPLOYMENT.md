@@ -26,6 +26,30 @@ The frontend can be deployed separately to Vercel while the existing Express and
 
 The Vercel deployment hosts only the built frontend. The Render service must stay online for login, data, AI analysis, live updates, camera signaling and other API features. Keep `DATABASE_URL`, `ADMIN_PASSWORD`, `SUPER_ADMIN_PASSWORD`, `JWT_SECRET`, and any optional AI or TURN values in Render; they do not belong in Vercel.
 
+### Camera relay options
+
+Cloudflare STUN can be used as a free connectivity-discovery server, and the application now includes `stun:stun.cloudflare.com:3478` alongside Google STUN. STUN does not relay media, so it cannot solve restrictive NAT or firewall cases by itself. Cloudflare TURN is supported when its generated TURN username and credential are configured below.
+
+For Cloudflare TURN, add the generated relay values in Render:
+
+```env
+CLOUDFLARE_TURN_URLS=turn:turn.cloudflare.com:3478,turns:turn.cloudflare.com:5349
+CLOUDFLARE_TURN_USERNAME=your-cloudflare-turn-username
+CLOUDFLARE_TURN_CREDENTIAL=your-cloudflare-turn-credential
+```
+
+Use the exact URLs and temporary credentials supplied by Cloudflare. Do not put a Cloudflare API token in these fields. If Cloudflare gave you an API token instead, the server needs a credential-generation endpoint integration rather than static TURN variables.
+
+For an ExpressTURN relay, add these private variables in Render using the exact values supplied by ExpressTURN:
+
+```env
+EXPRESSTURN_URLS=turn:your-server.example:3478,turns:your-server.example:5349
+EXPRESSTURN_USERNAME=your-turn-username
+EXPRESSTURN_CREDENTIAL=your-turn-credential
+```
+
+Use only `turn:` or `turns:` URLs, comma-separated when ExpressTURN supplies more than one endpoint. Metered remains supported and is combined with ExpressTURN when both are configured. Redeploy Render after changing these values.
+
 The Render Blueprint uses a build filter. Changes only inside `src/`, `public/`, or Vercel configuration will not trigger a Render deployment. Changes to `server/`, `shared/`, dependencies, `Dockerfile`, or `render.yaml` still trigger one. After changing the Blueprint, confirm the service's Auto-Deploy setting is enabled; Render will apply the filter to future commits.
 
 ## Render deployment (recommended for this repository)
