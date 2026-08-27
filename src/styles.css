@@ -4697,6 +4697,18 @@ body.resizing-sidebar {
   border-color: #a16207;
   background: #facc15;
 }
+.historical-sentiment-legend {
+  grid-template-columns: auto auto;
+  border-color: #315da8;
+}
+.historical-sentiment-legend i {
+  border: 0;
+}
+.historical-sentiment-legend small {
+  grid-column: 1/-1;
+  color: #bfdbfe;
+  font-size: 9px;
+}
 .sos-holding {
   touch-action: none;
   user-select: none;
@@ -4848,38 +4860,32 @@ body.resizing-sidebar {
   display: flex;
   align-items: center;
   gap: 5px;
-  padding: 3px;
-  border: 1px solid #6d1735;
-  border-radius: 10px;
-  background: #18050ce8;
-  box-shadow: 0 8px 22px #16040a55;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  box-shadow: none;
 }
 .election-view-switcher .election-view-open {
-  width: auto;
-  min-width: max-content;
-  padding: 0 10px;
-  border-color: #7f2947;
-  background: #2b0816;
-  color: #f8e7a1;
-  font-size: 9px;
-  font-weight: 900;
-  letter-spacing: 0.02em;
+  width: 36px !important;
+  min-width: 36px;
+  height: 36px;
+  padding: 0 !important;
+  border: 0;
+  background: transparent;
+  color: #dcfce7;
+  font-size: 16px !important;
 }
 .election-view-switcher .election-view-open:hover {
-  border-color: #d4af37;
-  background: #4a1027;
+  border-color: transparent;
+  background: transparent;
   color: #fff4bd;
-}
-.election-view-switcher .post-election-open {
-  border-color: #a13a5f;
 }
 .election-view-switcher .result-center-open {
   order: 0;
-  display: flex;
-  align-items: center;
-  gap: 5px;
-  border-color: #d4af37;
-  background: #5a1530;
+  display: grid;
+  place-items: center;
+  border-color: transparent;
+  background: transparent;
 }
 .results-center {
   position: fixed;
@@ -7789,8 +7795,38 @@ body.resizing-sidebar {
   display: inline-flex;
   align-items: center;
   gap: 6px;
-  border-color: #38bdf8 !important;
-  color: #bae6fd !important;
+  border: 1px solid #60a5fa !important;
+  background: #2563eb !important;
+  color: #ffffff !important;
+  box-shadow: 0 8px 20px #1d4ed855;
+  font-weight: 900 !important;
+}
+.sentiment-map-button:hover {
+  background: #1d4ed8 !important;
+  border-color: #93c5fd !important;
+}
+.pre-section-tabs {
+  display: inline-flex;
+  width: fit-content;
+  gap: 4px;
+  padding: 4px;
+  border: 1px solid #2f7a43;
+  border-radius: 10px;
+  background: #0a2114;
+}
+.pre-section-tabs button {
+  min-width: 112px;
+  border: 0;
+  border-radius: 7px;
+  background: transparent;
+  color: #9fc8aa;
+  padding: 9px 18px;
+  font-weight: 900;
+}
+.pre-section-tabs button.active {
+  background: #5a1530;
+  color: #fff4bd;
+  box-shadow: 0 5px 14px #16040a66;
 }
 .pre-election-caution {
   margin: 0;

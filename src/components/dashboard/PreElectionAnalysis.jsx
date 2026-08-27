@@ -4,7 +4,7 @@ import { HISTORICAL_ELECTION_DATASETS, HISTORICAL_ELECTION_RESULTS, getHistorica
 import { getRegistrationLocationOptions } from '../../../shared/electionData.js';
 
 const formatMetric = (value, metric) => `${Number(value || 0).toLocaleString()} ${metric === 'votes' ? 'votes' : metric === 'seats' ? 'seats' : 'wins'}`;
-const PARTY_COLORS = { APC: '#22c55e', PDP: '#ef4444', SDP: '#38bdf8', LP: '#a855f7', NNPP: '#f59e0b', 'Other parties': '#94a3b8' };
+const PARTY_COLORS = { APC: '#2563eb', PDP: '#dc2626', SDP: '#16a34a', LP: '#a855f7', NNPP: '#f59e0b', 'Other parties': '#94a3b8' };
 const normalizeName = (value) => String(value || '').trim().toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
 
 export default function PreElectionAnalysis({ onAnalyze, initialSelection = null, onShowMap }) {
@@ -13,6 +13,7 @@ export default function PreElectionAnalysis({ onAnalyze, initialSelection = null
   const [brief, setBrief] = useState('');
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
+  const [activeTab, setActiveTab] = useState('sentiment');
   const [selectedLga, setSelectedLga] = useState(initialSelection?.lga || '');
   const [selectedWard, setSelectedWard] = useState(initialSelection?.ward || '');
   const [selectedPollingUnit, setSelectedPollingUnit] = useState(initialSelection?.pollingUnit || '');
@@ -50,10 +51,18 @@ export default function PreElectionAnalysis({ onAnalyze, initialSelection = null
 
   const showSentimentMap = () => {
     if (!isGovernorSentiment || !result?.areas?.length) return;
+    const topParties = result.parties.slice(0, 3).map((item) => ({
+      party: item.party,
+      value: Number(item.value || 0),
+      percentage: totalPartyVotes ? (Number(item.value || 0) / totalPartyVotes) * 100 : 0,
+      color: PARTY_COLORS[item.party] || '#94a3b8',
+    }));
+    const otherValue = result.parties.slice(3).reduce((sum, item) => sum + Number(item.value || 0), 0);
     onShowMap?.({
       mode: 'historical-sentiment',
       election: '2023 Governorship',
       sourceNote: result.note,
+      partyShares: [...topParties, { party: 'Others', value: otherValue, percentage: totalPartyVotes ? (otherValue / totalPartyVotes) * 100 : 0, color: '#94a3b8' }],
       byLga: Object.fromEntries(result.areas.map((area) => [area.name, {
         winner: area.winner,
         runnerUp: area.runnerUp,
@@ -61,6 +70,10 @@ export default function PreElectionAnalysis({ onAnalyze, initialSelection = null
         runnerUpValue: area.runnerUpValue,
         margin: Number(area.winnerValue || 0) - Number(area.runnerUpValue || 0),
         color: PARTY_COLORS[area.winner] || '#94a3b8',
+        listedShares: [
+          { party: area.winner, value: Number(area.winnerValue || 0), percentage: (Number(area.winnerValue || 0) / Math.max(1, Number(area.winnerValue || 0) + Number(area.runnerUpValue || 0))) * 100 },
+          { party: area.runnerUp, value: Number(area.runnerUpValue || 0), percentage: (Number(area.runnerUpValue || 0) / Math.max(1, Number(area.winnerValue || 0) + Number(area.runnerUpValue || 0))) * 100 },
+        ],
       }])),
     });
   };
@@ -96,20 +109,25 @@ export default function PreElectionAnalysis({ onAnalyze, initialSelection = null
     <div className="pre-election-head">
       <div><span className="eyebrow">BEFORE THE NEXT ELECTION</span><h2>Pre-Election Historical Analysis</h2><p>Compare previous Kwara outcomes while keeping incomplete records clearly visible.</p></div>
       <div className="pre-election-actions">
-        {isGovernorSentiment && <button className="secondary action-btn sentiment-map-button" onClick={showSentimentMap}><MdMap /> Show on map</button>}
-        <button className="primary action-btn" disabled={loading || !result} onClick={generate}><MdFlashOn /> {loading ? 'Analyzing…' : 'Generate Brief'}</button>
+        {activeTab === 'sentiment' && isGovernorSentiment && <button className="secondary action-btn sentiment-map-button" onClick={showSentimentMap}><MdMap /> Show on map</button>}
+        {activeTab === 'history' && <button className="primary action-btn" disabled={loading || !result} onClick={generate}><MdFlashOn /> {loading ? 'Analyzing…' : 'Generate Brief'}</button>}
       </div>
     </div>
     <p className="pre-election-caution">Historical results are a baseline, not a forecast. Missing votes remain unavailable and are never converted to zero.</p>
 
-    {(brief || error) && <article className="pre-card pre-generated-brief"><header><div><h3>Statewide Historical Operations Brief</h3><p>Uses every loaded Kwara election dataset to assess party performance, LGA competitiveness, and operational readiness.</p></div></header>{brief && <div>{brief}</div>}{error && <p className="pre-analysis-error">{error}</p>}</article>}
-
-    <div className="pre-filter-card">
-      <label><span>Election year</span><select value={year} onChange={(event) => selectYear(event.target.value)}>{years.map((item) => <option key={item}>{item}</option>)}</select></label>
-      <label><span>Election type</span><select value={election} onChange={(event) => { setElection(event.target.value); setSelectedLga(''); setSelectedWard(''); setSelectedPollingUnit(''); }}>{elections.map((item) => <option key={item}>{item}</option>)}</select></label>
+    <div className="pre-section-tabs" role="tablist" aria-label="Pre-election analysis sections">
+      <button type="button" role="tab" aria-selected={activeTab === 'sentiment'} className={activeTab === 'sentiment' ? 'active' : ''} onClick={() => { setActiveTab('sentiment'); setYear(2023); setElection('Governorship'); }}>Sentiment</button>
+      <button type="button" role="tab" aria-selected={activeTab === 'history'} className={activeTab === 'history' ? 'active' : ''} onClick={() => setActiveTab('history')}>History</button>
     </div>
 
-    {isGovernorSentiment && result && <>
+    {activeTab === 'history' && (brief || error) && <article className="pre-card pre-generated-brief"><header><div><h3>Statewide Historical Operations Brief</h3><p>Uses every loaded Kwara election dataset to assess party performance, LGA competitiveness, and operational readiness.</p></div></header>{brief && <div>{brief}</div>}{error && <p className="pre-analysis-error">{error}</p>}</article>}
+
+    {activeTab === 'history' && <div className="pre-filter-card">
+      <label><span>Election year</span><select value={year} onChange={(event) => selectYear(event.target.value)}>{years.map((item) => <option key={item}>{item}</option>)}</select></label>
+      <label><span>Election type</span><select value={election} onChange={(event) => { setElection(event.target.value); setSelectedLga(''); setSelectedWard(''); setSelectedPollingUnit(''); }}>{elections.map((item) => <option key={item}>{item}</option>)}</select></label>
+    </div>}
+
+    {activeTab === 'sentiment' && isGovernorSentiment && result && <>
       <section className="pre-sentiment-summary">
         <header><div><span className="eyebrow">TEMPORARY SENTIMENT BASELINE</span><h3>2023 Governorship Historical Sentiment</h3><p>The latest governorship result is being used as a historical support signal until newer sentiment data is available.</p></div><button type="button" onClick={showSentimentMap}><MdMap /> Interactive map</button></header>
         <div className="sentiment-party-grid">{result.parties.map((item) => {
@@ -141,7 +159,7 @@ export default function PreElectionAnalysis({ onAnalyze, initialSelection = null
       </article>
     </>}
 
-    {dataset && result && <div className="pre-analysis-grid single">
+    {activeTab === 'history' && dataset && result && <div className="pre-analysis-grid single">
       <article className="pre-card">
         <header><div><h3>{year} {election}</h3><p>{result.metric === 'votes' ? 'Recorded party totals' : 'Recorded outcome distribution'}</p></div><span>{dataset.authority}</span></header>
         <div className="historical-party-bars">{result.parties.map((item) => <div key={item.party}><div><strong>{item.party}</strong><b>{formatMetric(item.value, result.metric)}</b></div><span><i style={{ width: `${(item.value / maxValue) * 100}%` }} /></span></div>)}</div>
@@ -149,7 +167,7 @@ export default function PreElectionAnalysis({ onAnalyze, initialSelection = null
       </article>
     </div>}
 
-    {result?.areas?.length > 0 && !isGovernorSentiment && <article className="pre-card pre-area-card"><header><div><h3>Constituency outcomes</h3><p>{result.metric === 'votes' ? 'Winner and closest listed challenger' : 'Winner record; votes unavailable'}</p></div><b>{result.areas.length} areas</b></header><div className="pre-area-grid">{result.areas.map((area) => <div key={area.name}><span>{area.name}</span><strong>{area.winner} · {area.candidate}</strong>{area.winnerValue != null ? <small>{area.winnerValue.toLocaleString()} vs {area.runnerUp} {area.runnerUpValue.toLocaleString()}</small> : <small>Vote totals not loaded</small>}</div>)}</div></article>}
+    {activeTab === 'history' && result?.areas?.length > 0 && <article className="pre-card pre-area-card"><header><div><h3>Constituency outcomes</h3><p>{result.metric === 'votes' ? 'Winner and closest listed challenger' : 'Winner record; votes unavailable'}</p></div><b>{result.areas.length} areas</b></header><div className="pre-area-grid">{result.areas.map((area) => <div key={area.name}><span>{area.name}</span><strong>{area.winner} · {area.candidate}</strong>{area.winnerValue != null ? <small>{area.winnerValue.toLocaleString()} vs {area.runnerUp} {area.runnerUpValue.toLocaleString()}</small> : <small>Vote totals not loaded</small>}</div>)}</div></article>}
 
   </section>;
 }

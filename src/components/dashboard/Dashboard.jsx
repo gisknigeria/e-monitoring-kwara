@@ -79,6 +79,8 @@ import {
   MdFilterHdr,
   MdCropSquare,
   MdAdjust,
+  MdHistory,
+  MdHowToVote,
 } from "react-icons/md";
 import ProfileModal from "./ProfileModal.jsx";
 import DashboardChatPanel from "./ChatPanel.jsx";
@@ -1521,8 +1523,10 @@ function MapView({
             const status = performance?.status || (partyMapAnalysis?.party ? "no-data" : "");
             const statusLabel = status === "winning" ? "Winning" : status === "losing" ? "Losing" : status === "tied" ? "Tied" : status === "no-data" ? "No submitted result" : "";
             const margin = performance?.margin ? ` · margin ${Number(performance.margin).toLocaleString()}` : "";
+            const listedShareText = (performance?.listedShares || []).map((item) => `${escapeMapText(item.party)} ${Number(item.percentage || 0).toFixed(1)}%`).join(" · ");
+            const statewideShareText = (partyMapAnalysis?.partyShares || []).map((item) => `${escapeMapText(item.party)} ${Number(item.percentage || 0).toFixed(1)}%`).join(" · ");
             const tooltip = partyMapAnalysis?.mode === "historical-sentiment" && performance
-              ? `<strong>${escapeMapText(name)}</strong><br><b>${escapeMapText(performance.winner)}</b> historical lead${escapeMapText(margin)}<br>${Number(performance.winnerValue || 0).toLocaleString()} vs ${escapeMapText(performance.runnerUp)} ${Number(performance.runnerUpValue || 0).toLocaleString()}<br><small>Click to open ward drill-down</small>`
+              ? `<strong>${escapeMapText(name)}</strong><br><b>${escapeMapText(performance.winner)}</b> historical lead${escapeMapText(margin)}<br><span>LGA listed vote share: ${listedShareText}</span><br><span>State top 3 + Others: ${statewideShareText}</span><br><small>Only APC/PDP LGA totals are loaded. Click to open ward drill-down.</small>`
               : partyMapAnalysis?.party
               ? `<strong>${escapeMapText(name)}</strong><br>${escapeMapText(partyMapAnalysis.party)}: ${escapeMapText(statusLabel)}${escapeMapText(margin)}`
               : escapeMapText(name);
@@ -1796,6 +1800,13 @@ function MapView({
   return (
     <>
       <div ref={el} className={`map map-${layer.toLowerCase()}`} />
+      {partyMapAnalysis?.mode === "historical-sentiment" && (
+        <div className="party-map-legend historical-sentiment-legend" role="status" aria-label="2023 governorship historical sentiment map">
+          <strong>2023 Governorship</strong>
+          {(partyMapAnalysis.partyShares || []).map((item) => <span key={item.party}><i style={{ background: item.color }} /> {item.party} {Number(item.percentage || 0).toFixed(1)}%</span>)}
+          <small>Map color = recorded LGA winner</small>
+        </div>
+      )}
       {partyMapAnalysis?.party && (
         <div className="party-map-legend" role="status" aria-label={`LGA performance map for ${partyMapAnalysis.party}`}>
           <strong>{partyMapAnalysis.party} by LGA</strong>
@@ -5749,25 +5760,28 @@ function Dashboard({ session, onLogout, onSessionUpdate }) {
             </button>}
             <div className="election-view-switcher" aria-label="Election intelligence views">
               <button
-                className="map-action election-view-open pre-election-open"
+                className="map-action election-view-open pre-election-open icon-only"
                 onClick={() => openResultsView("pre")}
                 title="Open pre-election dashboard"
+                aria-label="Pre-election dashboard"
               >
-                Pre-Election
+                <MdHistory />
               </button>
               <button
-                className="map-action election-view-open result-center-open"
+                className="map-action election-view-open result-center-open icon-only"
                 onClick={() => openResultsView("pulse")}
                 title="Open analytics dashboard"
+                aria-label="Analytics dashboard"
               >
-                <FaChartBar /> Dashboard
+                <FaChartBar />
               </button>
               <button
-                className="map-action election-view-open post-election-open"
+                className="map-action election-view-open post-election-open icon-only"
                 onClick={() => openResultsView("post")}
                 title="Open post-election dashboard"
+                aria-label="Post-election dashboard"
               >
-                Post-Election
+                <MdHowToVote />
               </button>
             </div>
             <button
