@@ -113,8 +113,6 @@ export default function PreElectionAnalysis({ onAnalyze, initialSelection = null
         {activeTab === 'history' && <button className="primary action-btn" disabled={loading || !result} onClick={generate}><MdFlashOn /> {loading ? 'Analyzing…' : 'Generate Brief'}</button>}
       </div>
     </div>
-    <p className="pre-election-caution">Historical results are a baseline, not a forecast. Missing votes remain unavailable and are never converted to zero.</p>
-
     <div className="pre-section-tabs" role="tablist" aria-label="Pre-election analysis sections">
       <button type="button" role="tab" aria-selected={activeTab === 'sentiment'} className={activeTab === 'sentiment' ? 'active' : ''} onClick={() => { setActiveTab('sentiment'); setYear(2023); setElection('Governorship'); }}>Sentiment</button>
       <button type="button" role="tab" aria-selected={activeTab === 'history'} className={activeTab === 'history' ? 'active' : ''} onClick={() => setActiveTab('history')}>History</button>
@@ -129,7 +127,7 @@ export default function PreElectionAnalysis({ onAnalyze, initialSelection = null
 
     {activeTab === 'sentiment' && isGovernorSentiment && result && <>
       <section className="pre-sentiment-summary">
-        <header><div><span className="eyebrow">TEMPORARY SENTIMENT BASELINE</span><h3>2023 Governorship Historical Sentiment</h3><p>The latest governorship result is being used as a historical support signal until newer sentiment data is available.</p></div><button type="button" onClick={showSentimentMap}><MdMap /> Interactive map</button></header>
+        <header><button type="button" onClick={showSentimentMap}><MdMap /> Interactive map</button></header>
         <div className="sentiment-party-grid">{result.parties.map((item) => {
           const share = totalPartyVotes ? (Number(item.value) / totalPartyVotes) * 100 : 0;
           return <article key={item.party} style={{ '--party-color': PARTY_COLORS[item.party] || '#94a3b8' }}><i /><span>{item.party}</span><strong>{share.toFixed(1)}%</strong><small>{Number(item.value).toLocaleString()} recorded votes</small><div><b style={{ width: `${share}%` }} /></div></article>;

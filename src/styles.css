@@ -4875,6 +4875,15 @@ body.resizing-sidebar {
   color: #dcfce7;
   font-size: 16px !important;
 }
+.election-view-switcher .pre-election-open {
+  color: #22c55e;
+}
+.election-view-switcher .result-center-open {
+  color: #f97316;
+}
+.election-view-switcher .post-election-open {
+  color: #3b82f6;
+}
 .election-view-switcher .election-view-open:hover {
   border-color: transparent;
   background: transparent;
