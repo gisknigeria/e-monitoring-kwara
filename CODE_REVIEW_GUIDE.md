@@ -5,7 +5,7 @@ This document explains the project in simple terms and gives you a way to descri
 
 ## 1. One-minute explanation
 
-You can explain the project like this:
+You can explain the project in this manner:
 
 > This is a Vite and React frontend connected to an Express backend. React displays the command-center interface and manages user interaction. The Express server exposes REST API endpoints for login, incidents, personnel, results, chat, cameras and map data. Socket.IO provides real-time updates such as new incidents, GPS positions, notifications, chat messages and camera signaling. PostgreSQL is used when `DATABASE_URL` is configured; otherwise the server uses a JSON file for local or demonstration use. The frontend is normally hosted on Vercel and the backend on Render.
 
