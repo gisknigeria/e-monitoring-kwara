@@ -1,8 +1,11 @@
 import { createHash, randomUUID } from 'node:crypto';
 
-const MAX_MEDIA_BYTES = 10 * 1024 * 1024;
+export const MAX_MEDIA_BYTES = 40 * 1024 * 1024;
 const MAX_TEXT_LENGTH = 4000;
-const MAX_REQUEST_BODY_BYTES = 20 * 1024 * 1024;
+export const MAX_REQUEST_BODY_BYTES = 170 * 1024 * 1024;
+const IMAGE_MIME_PATTERN = /^image\/(?:png|jpe?g|webp|gif|heic|heif)$/;
+const VIDEO_MIME_PATTERN = /^video\/(?:webm|mp4|quicktime|3gpp|3gpp2|x-msvideo)$/;
+const DOCUMENT_MIME_PATTERN = /^(?:application\/pdf|application\/msword|application\/vnd\.openxmlformats-officedocument\.(?:wordprocessingml\.document|spreadsheetml\.sheet|presentationml\.presentation)|application\/vnd\.ms-excel|application\/vnd\.ms-powerpoint|text\/plain|text\/csv)$/;
 
 export function sanitizeString(value, fallback = '') {
   if (value === null || value === undefined) return fallback;
@@ -25,19 +28,34 @@ export function validateMediaPayload(media) {
       continue;
     }
     const type = String(item.type || '').toLowerCase();
-    if (!['image', 'video'].includes(type)) {
+    if (type === 'livestream') {
+      if (!item.userId || typeof item.userId !== 'string') errors.push('Live stream attachment is missing its source');
+      continue;
+    }
+    if (!['image', 'video', 'document'].includes(type)) {
       errors.push('Unsupported media type');
       continue;
     }
     const data = String(item.data || '');
-    const match = data.match(/^data:(image\/(?:png|jpeg|webp)|video\/(?:webm|mp4));base64,([A-Za-z0-9+/]*={0,2})$/);
+    // Tolerate MIME parameters -- MediaRecorder emits "video/webm;codecs=vp8,opus" and the
+    // codec list itself contains a comma, so anything stricter rejects real recordings.
+    const match = data.match(/^data:(.+?);base64,([A-Za-z0-9+/]*={0,2})$/i);
     if (!match) {
       errors.push('Unsupported or malformed media payload');
       continue;
     }
-    const mime = match[1];
-    if ((type === 'image') !== mime.startsWith('image/')) {
-      errors.push('Declared media type does not match its MIME type');
+    const mime = match[1].split(';')[0].trim().toLowerCase();
+    const mimeMatchesType =
+      (type === 'image' && IMAGE_MIME_PATTERN.test(mime)) ||
+      (type === 'video' && VIDEO_MIME_PATTERN.test(mime)) ||
+      (type === 'document' && DOCUMENT_MIME_PATTERN.test(mime));
+    if (!mimeMatchesType) {
+      errors.push('Unsupported or malformed media payload');
+      continue;
+    }
+    const declaredMime = String(item.mimeType || '').split(';')[0].trim().toLowerCase();
+    if (declaredMime && declaredMime !== mime) {
+      errors.push('Media MIME metadata does not match its payload');
       continue;
     }
     const payload = match[2];
@@ -52,32 +70,6 @@ export function validateMediaPayload(media) {
     }
   }
   return { valid: errors.length === 0, errors };
-}
-
-export function validateChatAttachments(attachments) {
-  const items = Array.isArray(attachments) ? attachments : [];
-  const errors = [];
-  let totalBytes = 0;
-  if (items.length > 3) errors.push('A chat message can contain at most 3 attachments');
-  const allowedMime = /^(image\/(?:png|jpeg|webp)|video\/(?:webm|mp4)|application\/(?:pdf|msword|vnd\.ms-excel|vnd\.openxmlformats-officedocument\.(?:wordprocessingml\.document|spreadsheetml\.sheet))|text\/(?:plain|csv))$/;
-  for (const item of items.slice(0, 3)) {
-    if (!item || typeof item !== 'object') { errors.push('Each attachment must be an object'); continue; }
-    const type = String(item.type || '').toLowerCase();
-    if (!['image', 'video', 'document'].includes(type)) { errors.push('Unsupported attachment type'); continue; }
-    const data = String(item.data || '');
-    const match = data.match(/^data:([^;,]+);base64,([A-Za-z0-9+/]*={0,2})$/);
-    if (!match || !allowedMime.test(match[1])) { errors.push('Unsupported or malformed chat attachment'); continue; }
-    const mime = match[1];
-    if ((type === 'image') !== mime.startsWith('image/') || (type === 'video') !== mime.startsWith('video/')) {
-      if (type !== 'document' || mime.startsWith('image/') || mime.startsWith('video/')) errors.push('Attachment type does not match its MIME type');
-    }
-    const bytes = Buffer.from(match[2], 'base64').length;
-    totalBytes += bytes;
-    if (!bytes) errors.push('Attachment is empty');
-    if (bytes > 5 * 1024 * 1024) errors.push('Each chat attachment must be 5 MB or smaller');
-  }
-  if (totalBytes > 7 * 1024 * 1024) errors.push('Chat attachments must be 7 MB or smaller in total');
-  return { valid: errors.length === 0, errors, totalBytes };
 }
 
 export function isSafeIdentifier(value) {

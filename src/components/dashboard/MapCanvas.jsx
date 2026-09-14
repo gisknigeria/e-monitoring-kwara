@@ -4,7 +4,7 @@ import { FaMapMarkedAlt, FaTimes } from "react-icons/fa";
 import { MdAdjust, MdFilterHdr, MdHexagon, MdImage, MdLocationPin, MdPolyline } from "react-icons/md";
 import { API } from "../../config.js";
 
-const OYO_CENTER = [8.4799, 4.5418];
+const KWARA_CENTER = [8.4799, 4.5418];
 
 const CATEGORY_ICON_COMPONENTS = {
   Point: MdLocationPin,
@@ -92,13 +92,13 @@ export default function MapCanvas({
   const nigeriaLgaLabels = useRef([]);
   const hoverBoundaryLayer = useRef(null);
   const [layerPanelOpen, setLayerPanelOpen] = useState(false);
-  const [oyoBoundaries, setOyoBoundaries] = useState({ state: null, lgas: null });
+  const [kwaraBoundaries, setKwaraBoundaries] = useState({ state: null, lgas: null });
 
   useEffect(() => {
     const controller = new AbortController();
     fetch(`${API}/boundaries/kwara`, { signal: controller.signal })
       .then((response) => (response.ok ? response.json() : Promise.reject(new Error("Boundary service unavailable"))))
-      .then((data) => setOyoBoundaries({ state: data.state || null, lgas: data.lgas || null }))
+      .then((data) => setKwaraBoundaries({ state: data.state || null, lgas: data.lgas || null }))
       .catch((error) => {
         if (error.name !== "AbortError") console.warn("Kwara boundaries could not be loaded:", error.message);
       });
@@ -203,7 +203,7 @@ export default function MapCanvas({
 
   useEffect(() => {
     if (leaflet.current || !el.current) return;
-    const map = L.map(el.current, { zoomControl: false, doubleClickZoom: false }).setView(OYO_CENTER, 9);
+    const map = L.map(el.current, { zoomControl: false, doubleClickZoom: false }).setView(KWARA_CENTER, 9);
     L.control.zoom({ position: "bottomright" }).addTo(map);
     leaflet.current = map;
     mapRef.current = map;

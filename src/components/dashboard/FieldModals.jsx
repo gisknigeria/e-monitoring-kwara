@@ -205,6 +205,8 @@ const ReportTypeIcon = ({ type, size = 14, color = "currentColor" }) => {
 };
 
 export function PollingResultForm({ user, point, parties, onClose, onSave }) {
+  const [submitState, setSubmitState] = useState("idle");
+  const submitting = submitState === "submitting";
   const isAgent = user.role === "Agent";
   const isSupervisor = user.role === "Supervisor";
   const canChooseZone = ["Admin", "Super Admin"].includes(user.role);
@@ -259,8 +261,8 @@ export function PollingResultForm({ user, point, parties, onClose, onSave }) {
 
   const addPhoto = (file) => {
     if (!file) return;
-    if (!file.type.startsWith("image/") || file.size > 8 * 1024 * 1024) {
-      return setError("Choose an image not larger than 8MB.");
+    if (!file.type.startsWith("image/") || file.size > MAX_ATTACHMENT_BYTES) {
+      return setError(`Choose an image not larger than ${MAX_ATTACHMENT_MB}MB.`);
     }
     const reader = new FileReader();
     reader.onload = () =>
@@ -277,24 +279,42 @@ export function PollingResultForm({ user, point, parties, onClose, onSave }) {
     <div className="modal-backdrop">
       <form
         className="modal polling-result-modal"
-        onSubmit={(event) => {
+        onInvalidCapture={() => setSubmitState("idle")}
+        onSubmit={async (event) => {
           event.preventDefault();
+          if (submitting) return;
           const results = rows
             .filter((row) => row.party && row.votes !== "")
             .map((row) => ({ party: row.party, votes: Number(row.votes) }));
-          if (!results.length) return setError("Add at least one party and vote number.");
-          if (!photo) return setError("A photograph of the signed result is required.");
-          if (!assignment.pollingUnit) return setError("Select the polling unit being reported.");
-          onSave({
-            state: assignment.state,
-            pollingUnit: assignment.pollingUnit,
-            lga: assignment.lga,
-            ward: assignment.ward,
-            lat: point.lat,
-            lng: point.lng,
-            results,
-            media: [photo],
-          });
+          if (!results.length) {
+            setSubmitState("idle");
+            return setError("Add at least one party and vote number.");
+          }
+          if (!photo) {
+            setSubmitState("idle");
+            return setError("A photograph of the signed result is required.");
+          }
+          if (!assignment.pollingUnit) {
+            setSubmitState("idle");
+            return setError("Select the polling unit being reported.");
+          }
+          setSubmitState("submitting");
+          try {
+            await onSave({
+              state: assignment.state,
+              pollingUnit: assignment.pollingUnit,
+              lga: assignment.lga,
+              ward: assignment.ward,
+              lat: point.lat,
+              lng: point.lng,
+              results,
+              media: [photo],
+            });
+          } catch (saveError) {
+            setError(saveError.message || "Could not submit the result. Please try again.");
+          } finally {
+            setSubmitState("idle");
+          }
         }}
       >
         <div className="panel-title">
@@ -353,8 +373,10 @@ export function PollingResultForm({ user, point, parties, onClose, onSave }) {
         {photo && <div className="result-photo-ready">Photo ready: {photo.name}</div>}
         {error && <div className="error">{error}</div>}
         <div className="actions">
-          <button type="button" className="ghost" onClick={onClose}>Cancel</button>
-          <button className="primary" disabled={!parties.length}>Submit result now</button>
+          <button type="button" className="ghost" onClick={onClose} disabled={submitting}>Cancel</button>
+          <button type="submit" className="primary" disabled={!parties.length || submitting} aria-busy={submitting || submitState === "clicked"} onClick={() => setSubmitState("clicked")}>
+            {submitting || submitState === "clicked" ? "Submitting…" : "Submit result now"}
+          </button>
         </div>
       </form>
     </div>
@@ -401,7 +423,24 @@ export function PartyManager({ parties, onClose, onSave }) {
   );
 }
 
-export function IncidentForm({ point, users, onClose, onSave, isAdmin, currentUser }) {
+const MAX_ATTACHMENT_BYTES = 40 * 1024 * 1024;
+const MAX_TOTAL_ATTACHMENT_BYTES = 120 * 1024 * 1024;
+const MAX_ATTACHMENT_MB = MAX_ATTACHMENT_BYTES / (1024 * 1024);
+const MAX_TOTAL_ATTACHMENT_MB = MAX_TOTAL_ATTACHMENT_BYTES / (1024 * 1024);
+const DOCUMENT_MIME_TYPES = [
+  "application/pdf",
+  "application/msword",
+  "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+  "application/vnd.ms-excel",
+  "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+  "application/vnd.ms-powerpoint",
+  "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+  "text/plain",
+  "text/csv",
+];
+const DOCUMENT_ACCEPT = ".pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.txt,.csv," + DOCUMENT_MIME_TYPES.join(",");
+
+export function IncidentForm({ point, users, onClose, onSave, isAdmin, currentUser, sharingCamera }) {
   const initialType = point.reportType || INCIDENT_TYPES[0];
   const initialStyle = {
     ...REPORT_TYPE_STYLES[initialType],
@@ -441,6 +480,8 @@ export function IncidentForm({ point, users, onClose, onSave, isAdmin, currentUs
     lng: center.lng,
   });
   const [mediaError, setMediaError] = useState("");
+  const [submitError, setSubmitError] = useState("");
+  const [submitting, setSubmitting] = useState(false);
   const isResultReport = form.reportType === POLLING_RESULT_TYPE;
   const isFieldRestricted = ["Agent", "Supervisor"].includes(currentUser?.role);
   const officerOptions = users.filter((user) => ["Response Team", "Agent"].includes(user.role));
@@ -449,26 +490,45 @@ export function IncidentForm({ point, users, onClose, onSave, isAdmin, currentUs
 
   const addMedia = (files) => {
     setMediaError("");
-    let remainingBytes = 10 * 1024 * 1024 - form.media.reduce((sum, item) => sum + Number(item.size || 0), 0);
+    let remainingBytes = MAX_TOTAL_ATTACHMENT_BYTES - form.media.reduce((sum, item) => sum + Number(item.size || 0), 0);
     [...files].slice(0, 6 - form.media.length).forEach((file) => {
-      if (!file.type.startsWith("image/") && !file.type.startsWith("video/")) return;
-      if (file.size > 8 * 1024 * 1024) {
-        setMediaError("Each photo or video must be 8MB or smaller.");
+      const isImage = file.type.startsWith("image/");
+      const isVideo = file.type.startsWith("video/");
+      if (!isImage && !isVideo && !DOCUMENT_MIME_TYPES.includes(file.type)) {
+        setMediaError(`"${file.name}" isn't a supported file type.`);
+        return;
+      }
+      if (file.size > MAX_ATTACHMENT_BYTES) {
+        setMediaError(`Each attachment must be ${MAX_ATTACHMENT_MB}MB or smaller.`);
         return;
       }
       if (file.size > remainingBytes) {
-        setMediaError("Attachments can be up to 10MB in total per incident.");
+        setMediaError(`Attachments can be up to ${MAX_TOTAL_ATTACHMENT_MB}MB in total per incident.`);
         return;
       }
       remainingBytes -= file.size;
       const reader = new FileReader();
+      reader.onerror = () => setMediaError(`Could not read "${file.name}". Please try again.`);
       reader.onload = () =>
         setForm((old) => ({
           ...old,
-          media: [...old.media, { name: file.name, type: file.type.startsWith("video/") ? "video" : "image", size: file.size, data: reader.result }].slice(0, 6),
+          media: [...old.media, { name: file.name, type: isVideo ? "video" : isImage ? "image" : "document", mimeType: file.type, size: file.size, data: reader.result }].slice(0, 6),
         }));
       reader.readAsDataURL(file);
     });
+  };
+
+  const addLiveStreamLink = () => {
+    setMediaError("");
+    if (form.media.some((item) => item.type === "livestream")) return;
+    if (form.media.length >= 6) {
+      setMediaError("Remove an attachment before linking your live stream.");
+      return;
+    }
+    setForm((old) => ({
+      ...old,
+      media: [...old.media, { name: "Live camera stream", type: "livestream", size: 0, data: "", userId: currentUser.id }],
+    }));
   };
 
   const removeMedia = (index) =>
@@ -493,8 +553,10 @@ export function IncidentForm({ point, users, onClose, onSave, isAdmin, currentUs
     <div className="modal-backdrop">
       <form
         className="modal report-modal"
-        onSubmit={(e) => {
+        onSubmit={async (e) => {
           e.preventDefault();
+          if (submitting) return;
+          setSubmitError("");
           if (isResultReport && !form.media.some((item) => item.type === "image")) {
             setMediaError("A clear photograph of the signed polling-unit result is required.");
             return;
@@ -507,18 +569,25 @@ export function IncidentForm({ point, users, onClose, onSave, isAdmin, currentUs
           }
           const normalizedPollingUnit = pollingUnit.trim();
           const normalizedResultCount = resultCount.trim();
-          onSave({
-            ...form,
-            title: isResultReport ? `Polling Unit Result - ${normalizedPollingUnit}` : form.title,
-            description: isResultReport
-              ? `Polling unit: ${normalizedPollingUnit}\n\n${COMMAND_PARTY} vote count:\n${normalizedResultCount}`
-              : form.description,
-            reportType: nextType,
-            pollingUnit: normalizedPollingUnit,
-            resultCount: normalizedResultCount,
-            lga: currentUser?.lga || "",
-            ward: currentUser?.ward || "",
-          });
+          setSubmitting(true);
+          try {
+            await onSave({
+              ...form,
+              title: isResultReport ? `Polling Unit Result - ${normalizedPollingUnit}` : form.title,
+              description: isResultReport
+                ? `Polling unit: ${normalizedPollingUnit}\n\n${COMMAND_PARTY} vote count:\n${normalizedResultCount}`
+                : form.description,
+              reportType: nextType,
+              pollingUnit: normalizedPollingUnit,
+              resultCount: normalizedResultCount,
+              lga: currentUser?.lga || "",
+              ward: currentUser?.ward || "",
+            });
+          } catch (error) {
+            setSubmitError(error.message || "Could not submit this report. Please try again.");
+          } finally {
+            setSubmitting(false);
+          }
         }}
       >
         <div className="panel-title">
@@ -654,13 +723,24 @@ export function IncidentForm({ point, users, onClose, onSave, isAdmin, currentUs
               <input type="file" accept="image/*,video/*" multiple onChange={(e) => addMedia(e.target.files || [])} />
             </label>
           )}
+          {!isResultReport && (
+            <label className="capture-btn">
+              Attach document
+              <input type="file" accept={DOCUMENT_ACCEPT} multiple onChange={(e) => addMedia(e.target.files || [])} />
+            </label>
+          )}
+          {!isResultReport && sharingCamera && (
+            <button type="button" className="capture-btn" onClick={addLiveStreamLink}>
+              Link my live stream
+            </button>
+          )}
         </div>
         {mediaError && <div className="error">{mediaError}</div>}
         {form.media.length > 0 && (
           <div className="report-media-list">
             {form.media.map((item, index) => (
               <button type="button" key={`${item.name}-${index}`} onClick={() => removeMedia(index)} title="Remove attachment">
-                {item.type === "video" ? "VIDEO" : "PHOTO"} {index + 1}
+                {item.type === "video" ? "VIDEO" : item.type === "document" ? "DOC" : item.type === "livestream" ? "LIVE" : "PHOTO"} {index + 1}
               </button>
             ))}
           </div>
@@ -669,9 +749,12 @@ export function IncidentForm({ point, users, onClose, onSave, isAdmin, currentUs
           <b>{form.geometry ? `${form.geometry.type} incident area` : "Pinned location"}</b>
           <span>{form.lat.toFixed(5)}, {form.lng.toFixed(5)}</span>
         </div>
+        {submitError && <div className="error">{submitError}</div>}
         <div className="actions">
-          <button type="button" className="ghost" onClick={onClose}>Cancel</button>
-          <button className="primary">{isResultReport ? "Submit polling unit result" : "Submit incident"}</button>
+          <button type="button" className="ghost" onClick={onClose} disabled={submitting}>Cancel</button>
+          <button className="primary" disabled={submitting}>
+            {submitting ? "Submitting…" : isResultReport ? "Submit polling unit result" : "Submit incident"}
+          </button>
         </div>
       </form>
     </div>
@@ -690,7 +773,7 @@ export function OfficerManager({
 }) {
   const isSupervisor = currentUser.role === "Supervisor";
   const canManageRoles = ["Super Admin", "Admin"].includes(currentUser.role);
-  const manageableRoles = ["Supervisor", "Agent"];
+  const manageableRoles = ["Supervisor", "Agent", "Stakeholder"];
   if (!canManageRoles) {
     return (
       <div className="modal-backdrop">
@@ -743,6 +826,8 @@ export function OfficerManager({
   const [form, setForm] = useState(newAccountForm);
   const [managerTab, setManagerTab] = useState("create");
   const [error, setError] = useState("");
+  // Stakeholders are read-only statewide observers, so a field assignment does not apply to them.
+  const isStakeholderRole = form.role === "Stakeholder";
   const [roleChangeUser, setRoleChangeUser] = useState(null);
   const [roleChangeForm, setRoleChangeForm] = useState({ role: "", state: "", lga: "", ward: "" });
   const [roleChangeError, setRoleChangeError] = useState("");
@@ -895,18 +980,25 @@ export function OfficerManager({
               <label>Email<input required type="email" value={form.email} onChange={(event) => setForm({ ...form, email: event.target.value })} /></label>
               {canManageRoles && !isEditing && <label>System role<select value={form.role} onChange={(event) => setForm({ ...form, role: event.target.value, rank: event.target.value })}>{manageableRoles.map((role) => <option key={role}>{role}</option>)}</select></label>}
               <label>State<select required value={form.state} onChange={(event) => handleStateChange(event.target.value)} disabled={isSupervisor}>{stateOptions.map((state) => <option key={state.code} value={state.code}>{state.label}</option>)}</select></label>
-              <label>LGA<select required value={form.lga} onChange={(event) => handleLgaChange(event.target.value)} disabled={isSupervisor}>{getRegistrationLocationOptions(form.state).lgas.map((lga) => <option key={lga}>{lga}</option>)}</select></label>
+              <label>LGA {isStakeholderRole && "(not required)"}<select required={!isStakeholderRole} value={form.lga} onChange={(event) => handleLgaChange(event.target.value)} disabled={isSupervisor}>{getRegistrationLocationOptions(form.state).lgas.map((lga) => <option key={lga}>{lga}</option>)}</select></label>
                <label>Ward / supervisor zone
                  {form.role === "Supervisor" && !isSupervisor && <span className="ward-scope-actions"><button type="button" onClick={() => handleWardChange(wardOptions)}>Assign whole LGA</button><button type="button" onClick={() => handleWardChange([])}>Clear</button></span>}
                  <select multiple size={Math.min(8, wardOptions.length || 1)} value={selectedWards} onChange={(event) => handleWardChange([...event.target.selectedOptions].map((option) => option.value))} disabled={isSupervisor}>{wardOptions.map((ward) => <option key={ward} value={ward}>{ward}</option>)}</select>
                </label>
               <label>Polling unit {form.role === "Supervisor" ? "(optional)" : "assignment"}<select required={form.role === "Agent"} value={form.pollingUnit} onChange={(event) => setForm({ ...form, pollingUnit: event.target.value })}><option value="">All units in selected ward(s)</option>{locationOptions.pollingUnits.map((unit) => <option key={unit}>{unit}</option>)}</select></label>
-              <label>Contact / call sign<input required value={form.station} onChange={(event) => setForm({ ...form, station: event.target.value })} /></label>
+              <label>Contact / call sign<input required={!isStakeholderRole} value={form.station} onChange={(event) => setForm({ ...form, station: event.target.value })} /></label>
               {!isEditing && <label>Password<input required minLength="12" type="password" title="At least 12 characters with uppercase, lowercase, number, and special character" value={form.password} onChange={(event) => setForm({ ...form, password: event.target.value })} /></label>}
-              <label>Initial latitude<input required value={form.lat} onChange={(event) => setForm({ ...form, lat: event.target.value })} /></label>
-              <label>Initial longitude<input required value={form.lng} onChange={(event) => setForm({ ...form, lng: event.target.value })} /></label>
+              <label>Initial latitude<input required={!isStakeholderRole} value={form.lat} onChange={(event) => setForm({ ...form, lat: event.target.value })} /></label>
+              <label>Initial longitude<input required={!isStakeholderRole} value={form.lng} onChange={(event) => setForm({ ...form, lng: event.target.value })} /></label>
             </div>
-            <div className="location-summary"><strong>Selected assignment</strong><span>{STATE_CODE_TO_NAME[form.state] || form.state} · {form.lga || "No LGA"} · {form.ward || "No ward"} · {form.pollingUnit || "All units"}</span></div>
+            <div className="location-summary">
+              <strong>Selected assignment</strong>
+              <span>
+                {isStakeholderRole
+                  ? "Stakeholders observe the whole state and are read-only — no field assignment is needed."
+                  : `${STATE_CODE_TO_NAME[form.state] || form.state} · ${form.lga || "No LGA"} · ${form.ward || "No ward"} · ${form.pollingUnit || "All units"}`}
+              </span>
+            </div>
             {error && <div className="error">{error}</div>}
             <div className="form-actions"><button className="primary" disabled={!manageableRoles.length}>{isEditing ? "Save changes" : "Create account"}</button>{isEditing && <button type="button" className="ghost" onClick={() => { resetForm(); setManagerTab("list"); }}>Cancel edit</button>}</div>
           </form>

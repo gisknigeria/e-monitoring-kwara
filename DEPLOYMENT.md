@@ -2,55 +2,27 @@
 
 ## Vercel frontend with Render backend
 
-The frontend can be deployed separately to Vercel while the existing Express and Socket.IO server remains on Render.
+This repository is configured so Vercel serves the compiled Vite frontend while Render continues to run Express, Socket.IO, PostgreSQL access, IReV endpoints and other server-only features.
 
-1. Deploy the repository to Vercel with these project settings:
-   - Framework preset: `Vite`
-   - Build command: `npm run build`
-   - Output directory: `dist`
-2. In Vercel project settings, add this environment variable for Production (and Preview if needed):
+1. Import this Git repository into Vercel.
+2. Keep the detected framework as **Vite**. The included `vercel.json` runs `npm run build`, publishes `dist`, and sends SPA routes to `index.html`.
+3. In **Vercel → Project Settings → Environment Variables**, add the following for Production and Preview:
 
    ```env
-   VITE_API_URL=https://e-monitoring-kwara-l60u.onrender.com
+   VITE_API_URL=https://e-monitoring.onrender.com
    ```
 
-   Use the backend origin only, without a trailing slash or `/api`.
-3. Deploy the Vercel project and copy its public URL.
-4. In Render, set:
+   Replace that value if the Render service uses a different public URL. Redeploy Vercel after changing it because Vite embeds this value during the build.
+
+4. After Vercel supplies the final frontend domain, update Render's `CORS_ORIGIN` to contain both exact origins, separated by a comma:
 
    ```env
-   CORS_ORIGIN=https://e-monitoring-kwara-l60u.onrender.com,https://e-monitoring-kwara.vercel.app
+   CORS_ORIGIN=https://e-monitoring.onrender.com,https://YOUR-PROJECT.vercel.app
    ```
 
-   If you use a custom frontend domain, add it as another comma-separated origin. Redeploy or restart Render after changing it.
+5. Keep `IREV_AUTO_SYNC=false` on Render. If the live IReV source is unavailable, the API now serves the bundled archive, reports that polling has stopped, and waits for an administrator to press **Refresh now** before trying the source again.
 
-The Vercel deployment hosts only the built frontend. The Render service must stay online for login, data, AI analysis, live updates, camera signaling and other API features. Keep `DATABASE_URL`, `ADMIN_PASSWORD`, `SUPER_ADMIN_PASSWORD`, `JWT_SECRET`, and any optional AI or TURN values in Render; they do not belong in Vercel.
-
-### Camera relay options
-
-Cloudflare STUN can be used as a free connectivity-discovery server, and the application now includes `stun:stun.cloudflare.com:3478` alongside Google STUN. STUN does not relay media, so it cannot solve restrictive NAT or firewall cases by itself. Cloudflare TURN is supported when its generated TURN username and credential are configured below.
-
-For Cloudflare TURN, add the generated relay values in Render:
-
-```env
-CLOUDFLARE_TURN_URLS=turn:turn.cloudflare.com:3478,turns:turn.cloudflare.com:5349
-CLOUDFLARE_TURN_USERNAME=your-cloudflare-turn-username
-CLOUDFLARE_TURN_CREDENTIAL=your-cloudflare-turn-credential
-```
-
-Use the exact URLs and temporary credentials supplied by Cloudflare. Do not put a Cloudflare API token in these fields. If Cloudflare gave you an API token instead, the server needs a credential-generation endpoint integration rather than static TURN variables.
-
-For an ExpressTURN relay, add these private variables in Render using the exact values supplied by ExpressTURN:
-
-```env
-EXPRESSTURN_URLS=turn:your-server.example:3478,turns:your-server.example:5349
-EXPRESSTURN_USERNAME=your-turn-username
-EXPRESSTURN_CREDENTIAL=your-turn-credential
-```
-
-Use only `turn:` or `turns:` URLs, comma-separated when ExpressTURN supplies more than one endpoint. Metered remains supported and is combined with ExpressTURN when both are configured. Redeploy Render after changing these values.
-
-The Render Blueprint uses a build filter. Changes only inside `src/`, `public/`, or Vercel configuration will not trigger a Render deployment. Changes to `server/`, `shared/`, dependencies, `Dockerfile`, or `render.yaml` still trigger one. After changing the Blueprint, confirm the service's Auto-Deploy setting is enabled; Render will apply the filter to future commits.
+Do not add database URLs, JWT secrets, passwords, TURN credentials or private API keys to Vercel. They belong only on Render.
 
 ## Render deployment (recommended for this repository)
 
@@ -62,9 +34,10 @@ The Render Blueprint uses a build filter. Changes only inside `src/`, `public/`,
    - `DATABASE_URL`: your Neon pooled PostgreSQL connection string, including `sslmode=require`.
    - `ADMIN_PASSWORD`: the password for `admin@command.local`.
    - `SUPER_ADMIN_PASSWORD`: the password for `superadmin@command.local`.
-   - `METERED_DOMAIN`: the Metered application domain, for example `your-app.metered.live` (no path).
-   - `METERED_TURN_API_KEY`: the credential-scoped API key shown for the TURN credential in Metered. Do not use the account Secret Key.
-   - `METERED_TURN_REGION`: optional Metered region; use `standard` to follow the credential's default region.
+   - `CLOUDFLARE_TURN_KEY_ID`: the 32-character TURN key ID created under Cloudflare Realtime TURN.
+   - `CLOUDFLARE_TURN_API_TOKEN`: the secret bearer token belonging to that TURN key—not a general Cloudflare account API token.
+   - `CLOUDFLARE_TURN_TTL`: credential lifetime in seconds. Keep the provided default of `86400` unless calls must last longer than one day.
+   - `EXPRESSTURN_URLS`, `EXPRESSTURN_USERNAME`, and `EXPRESSTURN_PASSWORD`: the backup relay credentials supplied by ExpressTURN.
 
    Do not put these values directly into `render.yaml` or commit them to Git.
 
@@ -75,18 +48,31 @@ The Starter plan is intentional: Render's free web service cannot attach a persi
 
 The single service supports WebSockets, so live incident and GPS updates use the same public HTTPS domain.
 
-## Metered TURN
+## Cloudflare TURN with ExpressTURN fallback
 
-The browser requests authenticated ICE configuration from `/api/turn/credentials`. The server reads the Metered values from the deployment environment, retrieves and validates the STUN/TURN credentials, and passes them to WebRTC without exposing the server environment values.
+The browser requests authenticated ICE configuration from `/api/turn/credentials`. The server uses the private Cloudflare TURN key to generate short-lived ICE credentials. Cloudflare servers are returned first and ExpressTURN servers are appended second, allowing WebRTC to gather backup relay candidates during the same connection attempt. If Cloudflare credential generation fails, the endpoint returns ExpressTURN directly. The last fallback is public STUN only.
 
-The Camera Feeds header reports the active connection state:
+In the Camera Feeds header:
 
-- `Metered TURN ready` means valid Metered relay credentials were loaded.
-- `Connected via Metered TURN` means the selected WebRTC candidate pair is using the relay.
-- `Metered ready · direct route` means TURN is available, but WebRTC selected a faster direct/STUN route.
-- `STUN fallback only` means the Metered values are missing, invalid, or the credential request failed.
+- `Cloudflare TURN ready · ExpressTURN backup` means both relay providers are configured.
+- `Connected via Cloudflare TURN` means Cloudflare is carrying the selected relay connection.
+- `Connected via ExpressTURN` means the backup relay was selected.
+- `Cloudflare ready · direct route` means TURN is available, but WebRTC selected a faster direct/STUN route.
+- `STUN fallback only` means neither TURN provider is available.
 
-After changing deployment environment values, redeploy or restart the service so the server reads them.
+After changing Render environment values, redeploy or restart the service so the server reads them.
+
+## ExpressTURN fallback
+
+Cloudflare is primary. Copy the TURN URL(s), username, and password shown in the ExpressTURN dashboard into these private Render variables so ExpressTURN is available second:
+
+```env
+EXPRESSTURN_URLS=turn:YOUR_EXPRESSTURN_HOST:3478,turns:YOUR_EXPRESSTURN_HOST:5349
+EXPRESSTURN_USERNAME=the-username-from-expressturn
+EXPRESSTURN_PASSWORD=the-password-from-expressturn
+```
+
+Use the exact URLs and credentials supplied by ExpressTURN. Do not put dashboard credentials in frontend code or commit them. The server returns the credentials only to authenticated users through `/api/turn/credentials`. When ExpressTURN is active, the camera panel reports `ExpressTURN ready` or `Connected via ExpressTURN`.
 
 ## Neon database
 

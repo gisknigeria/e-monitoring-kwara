@@ -5,9 +5,10 @@ import {
   NIGERIA_REGISTRATION_LOCATION_DATA,
   STATE_CODE_TO_NAME,
   normalizeRegistrationState,
+  resolveCanonicalName,
 } from './nigeriaPollingData.js';
 
-export const OPERATION_ROLES = ["Admin", "Supervisor", "Agent"];
+export const OPERATION_ROLES = ["Admin", "Response Team", "Supervisor", "Agent"];
 
 export const rankLevel = (role) => {
   if (role === "Super Admin") return -1;
@@ -31,7 +32,7 @@ export const OYO_LGAS = [
   "Saki West", "Surulere",
 ];
 
-export { NIGERIA_STATES, DEFAULT_REGISTRATION_STATE, getRegistrationLocationOptions, NIGERIA_REGISTRATION_LOCATION_DATA, STATE_CODE_TO_NAME, normalizeRegistrationState };
+export { NIGERIA_STATES, DEFAULT_REGISTRATION_STATE, getRegistrationLocationOptions, NIGERIA_REGISTRATION_LOCATION_DATA, STATE_CODE_TO_NAME, normalizeRegistrationState, resolveCanonicalName };
 
 export const UNIT_TYPES = [
   "Command Center",

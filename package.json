@@ -7,11 +7,21 @@
     "dev": "concurrently \"npm:dev:server\" \"npm:dev:client\"",
     "dev:client": "vite",
     "dev:server": "node server/index.js",
+    "start:media": "node media-server/index.js",
     "build": "vite build",
     "start": "node server/index.js",
-    "security:check": "node scripts/security-check.js"
+    "security:check": "node scripts/security-check.js",
+    "test:backend": "node scripts/test-backend.mjs",
+    "test:smoke": "node scripts/backend-smoke.mjs",
+    "test:media-smoke": "node scripts/media-server-smoke.mjs",
+    "benchmark:geography": "node scripts/benchmark-geographic-view.mjs",
+    "load:probe": "node scripts/load-probe.mjs",
+    "export:backend": "node scripts/export-backend.mjs"
   },
   "dependencies": {
+    "@socket.io/redis-adapter": "^8.3.0",
+    "@tailwindcss/vite": "^4.3.3",
+    "@tanstack/react-query": "^5.102.8",
     "@vitejs/plugin-react": "latest",
     "bcryptjs": "latest",
     "cors": "latest",
@@ -24,10 +34,12 @@
     "react": "latest",
     "react-dom": "latest",
     "react-icons": "^5.6.0",
+    "redis": "^6.2.1",
     "sharp": "^0.35.3",
     "shpjs": "^6.2.0",
     "socket.io": "latest",
     "socket.io-client": "latest",
+    "tailwindcss": "^4.3.3",
     "vite": "latest"
   },
   "devDependencies": {

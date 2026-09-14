@@ -5,12 +5,12 @@ import { NIGERIA_STATES, getRegistrationLocationOptions } from './electionData.j
 test('registration location data includes Nigeria states and real polling-unit options', () => {
   assert.ok(NIGERIA_STATES.includes('Oyo'));
   assert.ok(NIGERIA_STATES.includes('Abia'));
-  const kwaraOptions = getRegistrationLocationOptions('Kwara');
-  assert.ok(kwaraOptions.lgas.includes('ASA'));
-  const asaOptions = getRegistrationLocationOptions('Kwara', 'ASA');
-  assert.ok(asaOptions.wards.includes('ADIGBONGBO/AWE/ORIMARO'));
-  const kwaraPollingUnits = getRegistrationLocationOptions('Kwara', 'ASA', 'ADIGBONGBO/AWE/ORIMARO');
-  assert.ok(kwaraPollingUnits.pollingUnits.includes('ADIGBONGBO L.G.E.A SCH'));
+  const oyoOptions = getRegistrationLocationOptions('Oyo');
+  assert.ok(oyoOptions.lgas.includes('AFIJIO'));
+  const afijioOptions = getRegistrationLocationOptions('Oyo', 'AFIJIO');
+  assert.ok(afijioOptions.wards.includes('AKINMORIN/JOBELE'));
+  const oyoPollingUnits = getRegistrationLocationOptions('Oyo', 'AFIJIO', 'AKINMORIN/JOBELE');
+  assert.ok(oyoPollingUnits.pollingUnits.includes('BAALE JOBELE OPEN SPACE'));
 
   const abiaOptions = getRegistrationLocationOptions('Abia', 'ABA NORTH', 'EZIAMA');
   assert.ok(abiaOptions.lgas.includes('ABA NORTH'));

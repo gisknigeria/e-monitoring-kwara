@@ -94,7 +94,7 @@ export default function Login({ onLogin }) {
   return (
     <main className="login-shell">
       <section className="login-brand">
-        <img className="campaign-logo-bare" src="/pdp-logo.png" alt="Peoples Democratic Party logo" />
+        <img className="campaign-logo" src="/pdp-logo.png" alt="Peoples Democratic Party logo" />
         <p className="command-kicker">Election Intelligence Platform</p>
         <h1 className="command-title">Election Monitoring Command Center</h1>
         <p className="command-copy">
@@ -103,17 +103,19 @@ export default function Login({ onLogin }) {
       </section>
 
       <form className="login-card" onSubmit={submit}>
-        <img className="login-card-logo-bare" src="/pdp-logo.png" alt="Peoples Democratic Party logo" />
+        <img className="login-card-logo" src="/pdp-logo.png" alt="Peoples Democratic Party logo" />
         <div className="eyebrow">SECURE ACCESS</div>
         <h2>Welcome back</h2>
         <p className="muted">Sign in with your authorized election operations credentials.</p>
 
         <label>
-          Email address
+          Email, phone number or agent login ID
           <input
             value={email}
             onChange={(e) => setEmail(e.target.value)}
-            type="email"
+            type="text"
+            autoComplete="username"
+            required
           />
         </label>
 
