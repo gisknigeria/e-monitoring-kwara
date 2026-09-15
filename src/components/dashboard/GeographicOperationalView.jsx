@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import L from 'leaflet';
+import { createStreetTileLayer } from '../../maps/streetTiles.js';
 import { apiRequest } from '../../api/client.js';
 import { API } from '../../config.js';
 import { kwaraBoundariesQuery } from '../../queries/boundaries.js';
@@ -42,11 +43,7 @@ function ScopeMap({ scope, onSelectLga, onSelectWard }) {
     if (mapRef.current || !el.current) return;
     const map = L.map(el.current, { zoomControl: false, attributionControl: false, scrollWheelZoom: false }).setView([8.0, 3.9], 8);
     L.control.zoom({ position: 'bottomright' }).addTo(map);
-    const maptilerKey = import.meta.env.VITE_MAPTILER_KEY;
-    (maptilerKey
-      ? L.tileLayer(`https://api.maptiler.com/maps/streets-v2/{z}/{x}/{y}.png?key=${maptilerKey}`, { maxZoom: 19, attribution: '&copy; MapTiler &copy; OpenStreetMap contributors' })
-      : L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { maxZoom: 19, attribution: '&copy; OpenStreetMap contributors' })
-    ).addTo(map);
+    createStreetTileLayer(L).addTo(map);
     mapRef.current = map;
     return () => { map.remove(); mapRef.current = null; };
   }, []);

@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import L from 'leaflet';
+import { createStreetTileLayer } from '../../maps/streetTiles.js';
 import { apiRequest } from '../../api/client.js';
 import { kwaraBoundariesQuery } from '../../queries/boundaries.js';
 import { agentsInArea, areaKey, matchArea, partyColor, resultSummary } from '../../../shared/areaAnalysis.js';
@@ -58,11 +59,7 @@ export default function SentimentMap({ authToken, canAdmin }) {
   useEffect(() => {
     const instance = L.map(mapNode.current, { scrollWheelZoom: true }).setView([8.0, 3.8], 8);
     map.current = instance;
-    const maptilerKey = import.meta.env.VITE_MAPTILER_KEY;
-    (maptilerKey
-      ? L.tileLayer(`https://api.maptiler.com/maps/streets-v2/{z}/{x}/{y}.png?key=${maptilerKey}`, { attribution: '&copy; MapTiler &copy; OpenStreetMap contributors', maxZoom: 19 })
-      : L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { attribution: '&copy; OpenStreetMap contributors', maxZoom: 19 })
-    ).addTo(instance);
+    createStreetTileLayer(L).addTo(instance);
     const observer = new ResizeObserver(() => instance.invalidateSize());
     observer.observe(mapNode.current);
     return () => { observer.disconnect(); instance.remove(); map.current = null; };

@@ -3,6 +3,7 @@ import L from "leaflet";
 import { FaMapMarkedAlt, FaTimes } from "react-icons/fa";
 import { MdAdjust, MdFilterHdr, MdHexagon, MdImage, MdLocationPin, MdPolyline } from "react-icons/md";
 import { API } from "../../config.js";
+import { createStreetTileLayer } from "../../maps/streetTiles.js";
 
 const KWARA_CENTER = [8.4799, 4.5418];
 
@@ -225,12 +226,7 @@ export default function MapCanvas({
     if (!leaflet.current) return;
     tile.current?.remove();
 
-    const osm = () =>
-      L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
-        crossOrigin: true,
-        maxZoom: 19,
-        attribution: "&copy; OpenStreetMap contributors",
-      });
+    const street = () => createStreetTileLayer(L);
 
     const esri = (service) =>
       L.tileLayer(
@@ -253,7 +249,7 @@ export default function MapCanvas({
     else if (layer === "Topo") layers = [topo()];
     else if (layer === "EsriStreet") layers = [esriStreet()];
     else if (layer === "Satellite") layers = [imagery()];
-    else layers = [osm()];
+    else layers = [street()];
 
     tile.current = L.layerGroup(layers).addTo(leaflet.current);
     tile.current.eachLayer((x) => x.bringToBack());

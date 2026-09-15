@@ -3,6 +3,7 @@ import { useQuery } from "@tanstack/react-query";
 import L from "leaflet";
 import { kwaraBoundariesQuery } from "../../queries/boundaries.js";
 import { apiRequest } from "../../api/client.js";
+import { createStreetTileLayer } from "../../maps/streetTiles.js";
 import LayerControlPanel, { layerGeometry } from "./LayerControlPanel.jsx";
 
 const DATA_LAYERS = ["none", "population", "network"];
@@ -239,22 +240,7 @@ export default function MapView({
   useEffect(() => {
     if (!leaflet.current) return;
     tile.current?.remove();
-    const maptilerKey = import.meta.env.VITE_MAPTILER_KEY;
-    const osm = () =>
-      maptilerKey
-        ? L.tileLayer(
-            `https://api.maptiler.com/maps/streets-v2/{z}/{x}/{y}.png?key=${maptilerKey}`,
-            {
-              crossOrigin: true,
-              maxZoom: 19,
-              attribution: "&copy; MapTiler &copy; OpenStreetMap contributors",
-            },
-          )
-        : L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
-            crossOrigin: true,
-            maxZoom: 19,
-            attribution: "&copy; OpenStreetMap contributors",
-          });
+    const street = () => createStreetTileLayer(L);
     const esri = (service) =>
       L.tileLayer(
         `https://server.arcgisonline.com/ArcGIS/rest/services/${service}/MapServer/tile/{z}/{y}/{x}`,
@@ -274,7 +260,7 @@ export default function MapView({
     else if (layer === "Topo") layers = [topo()];
     else if (layer === "EsriStreet") layers = [esriStreet()];
     else if (layer === "Satellite") layers = [imagery()];
-    else layers = [osm()];
+    else layers = [street()];
     tile.current = L.layerGroup(layers).addTo(leaflet.current);
     tile.current.eachLayer((x) => x.bringToBack());
   }, [layer]);
@@ -1230,4 +1216,3 @@ export default function MapView({
     </>
   );
 }
-
