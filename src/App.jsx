@@ -1,4 +1,4 @@
-﻿import { useState } from "react";
+﻿import { useEffect, useState } from "react";
 import Login from "./components/auth/Login.jsx";
 import { lazy, Suspense } from "react";
 import { API } from "./config.js";
@@ -37,6 +37,12 @@ export default function App() {
     queryClient.clear();
     setSession(null);
   };
+
+  useEffect(() => {
+    const handleSessionExpired = () => logout();
+    window.addEventListener("command-session-expired", handleSessionExpired);
+    return () => window.removeEventListener("command-session-expired", handleSessionExpired);
+  }, []);
 
   const updateSession = (value) => {
     const next = { token: value.token, user: value.user };

@@ -9,13 +9,14 @@ const STATUS_LABEL = {
 };
 
 export default function OverVotingCheck({ authToken, geography = { state: 'Kwara' } }) {
-  const params = new URLSearchParams(Object.entries(geography).filter(([, value]) => value));
+  const safeGeography = geography || { state: 'Kwara' };
+  const params = new URLSearchParams(Object.entries(safeGeography).filter(([, value]) => value));
   const check = useQuery({
     queryKey: ['over-voting', authToken, params.toString()],
     queryFn: ({ signal }) => apiRequest(`/reports/over-voting?${params.toString()}`, authToken, { signal }),
   });
 
-  const scopeLabel = [geography.state, geography.lga, geography.ward, geography.pollingUnit].filter(Boolean).join(' · ') || 'Kwara State';
+  const scopeLabel = [safeGeography.state, safeGeography.lga, safeGeography.ward, safeGeography.pollingUnit].filter(Boolean).join(' · ') || 'Kwara State';
 
   return (
     <article className="post-card overvoting-card">

@@ -854,7 +854,11 @@ function DashboardRuntime({ session, onLogout, onSessionUpdate }) {
     window.addEventListener("online", flushOfflineVideoQueue);
     const uploadRetryTimer = setInterval(flushOfflineVideoQueue, 15000);
     if (navigator.onLine) flushOfflineVideoQueue();
-    socket.on("connect_error", () => {
+    socket.on("connect_error", (error) => {
+      if (/unauthorized|session/i.test(error?.message || "") && typeof window !== "undefined") {
+        window.dispatchEvent(new Event("command-session-expired"));
+        return;
+      }
       setNotice("Realtime connection is reconnecting...");
       if (localCameraStreamRef.current)
         startOfflineVideoRecording("Network connection unavailable");

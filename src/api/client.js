@@ -35,6 +35,9 @@ export async function apiRequest(path, token, options = {}) {
       : await response.text();
 
   if (!response.ok) {
+    if (response.status === 401 && token && typeof window !== "undefined") {
+      window.dispatchEvent(new Event("command-session-expired"));
+    }
     const error = new Error(safeApiErrorMessage(response.status, body, contentType));
     error.code = typeof body === "object" && body ? body.code : "";
     error.status = response.status;
