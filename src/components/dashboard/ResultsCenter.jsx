@@ -150,18 +150,30 @@ export default function ResultsCenter({ incidents, parties = [], officers = [], 
   }, [fieldResultRows]);
   const filteredIrevUploads = useMemo(() => {
     const query = irevSearch.trim().toLowerCase();
-    const uploads = irevPilot?.uploads || [];
+    const uploads = Array.isArray(irevPilot?.uploads) ? irevPilot.uploads : [];
     if (!query) return uploads;
     return uploads.filter((upload) => [upload.puCode, upload.pollingUnit, upload.ward, upload.lga].some((value) => String(value || "").toLowerCase().includes(query)));
   }, [irevPilot, irevSearch]);
-  const irevResultRows = useMemo(() => irevPublishedResults?.pollingUnits || [], [irevPublishedResults]);
+  const irevResultRows = useMemo(
+    () => Array.isArray(irevPublishedResults?.pollingUnits) ? irevPublishedResults.pollingUnits : [],
+    [irevPublishedResults],
+  );
   const filteredIrevResultRows = useMemo(() => {
     const query = irevSearch.trim().toLowerCase();
     if (!query) return irevResultRows;
     return irevResultRows.filter((row) => [row.puCode, row.pollingUnit, row.ward, row.lga].some(value => String(value || "").toLowerCase().includes(query)));
   }, [irevResultRows, irevSearch]);
   const irevRowsByUnit = useMemo(() => new Map(irevResultRows.map((row) => [resultUnitKey(row), row])), [irevResultRows]);
-  const irevOnlyTotals = useMemo(() => Object.fromEntries((irevPublishedResults?.totals || []).map(({ party, votes }) => [party, Number(votes || 0)])), [irevPublishedResults]);
+  const irevOnlyTotals = useMemo(() => {
+    const totals = irevPublishedResults?.totals;
+    if (Array.isArray(totals)) {
+      return Object.fromEntries(totals.map(({ party, votes }) => [party, Number(votes || 0)]));
+    }
+    if (totals && typeof totals === "object") {
+      return Object.fromEntries(Object.entries(totals).map(([party, votes]) => [party, Number(votes || 0)]));
+    }
+    return {};
+  }, [irevPublishedResults]);
   const irevTopParties = useMemo(() => Object.keys(irevOnlyTotals).filter((party) => irevOnlyTotals[party] > 0).sort((a, b) => irevOnlyTotals[b] - irevOnlyTotals[a]).slice(0, 5), [irevOnlyTotals]);
   const top6 = useMemo(() => summary.partyNames.filter((party) => summary.totals[party] > 0).sort((a,b) => summary.totals[b]-summary.totals[a]).slice(0,6), [summary]);
   const winLoss = useMemo(() => {
