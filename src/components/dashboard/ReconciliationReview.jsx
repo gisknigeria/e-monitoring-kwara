@@ -16,17 +16,28 @@ const DECISIONS = [
   { value: 'correct', label: 'Apply a corrected result' },
 ];
 
+// Production APIs may return a collection directly or wrap it in a `data`
+// envelope. Normalize both contracts at the component boundary so an otherwise
+// successful response can never crash rendering with `data.map is not a function`.
+export function normalizeCollectionResponse(payload) {
+  if (Array.isArray(payload)) return payload;
+  if (Array.isArray(payload?.data)) return payload.data;
+  if (payload?.data && typeof payload.data === 'object') return Object.values(payload.data);
+  return [];
+}
+
 function CorrectionViewer({ authToken, reconciliationId }) {
   const corrections = useQuery({
     queryKey: ['reconciliation-corrections', authToken, reconciliationId],
     queryFn: ({ signal }) => apiRequest(`/results/reconciliation/${reconciliationId}/corrections`, authToken, { signal }),
   });
+  const correctionItems = normalizeCollectionResponse(corrections.data);
   if (corrections.isPending) return <p role="status">Loading correction…</p>;
   if (corrections.isError) return <p role="alert">{corrections.error.message}</p>;
-  if (!corrections.data?.length) return <p className="area-note">No correction record found for this case.</p>;
+  if (!correctionItems.length) return <p className="area-note">No correction record found for this case.</p>;
   return (
     <div className="rr-corrections">
-      {corrections.data.map((item) => (
+      {correctionItems.map((item) => (
         <div key={item.id} className="rr-correction">
           <span>Corrected by {item.correctedBy || 'unknown'} · {new Date(item.createdAt).toLocaleString()}</span>
           <p>{item.reason}</p>
@@ -135,6 +146,7 @@ export default function ReconciliationReview({ authToken }) {
     queryKey: ['reconciliation-cases', authToken, status],
     queryFn: ({ signal }) => apiRequest(`/results/reconciliation${status ? `?status=${status}` : ''}`, authToken, { signal }),
   });
+  const caseItems = normalizeCollectionResponse(cases.data);
 
   return (
     <article className="post-card reconciliation-card">
@@ -153,12 +165,12 @@ export default function ReconciliationReview({ authToken }) {
 
       {cases.isPending && <p role="status">Loading reconciliation cases…</p>}
       {cases.isError && <p role="alert">{cases.error.message} <button onClick={() => cases.refetch()}>Retry</button></p>}
-      {cases.data && !cases.data.length && (
+      {cases.isSuccess && !caseItems.length && (
         <p className="area-note">No reconciliation cases{status ? ` with status "${status}"` : ''} yet.</p>
       )}
-      {cases.data && cases.data.length > 0 && (
+      {caseItems.length > 0 && (
         <div className="rr-case-list">
-          {cases.data.map((item) => (
+          {caseItems.map((item) => (
             <ReconciliationCase
               key={item.id}
               authToken={authToken}
