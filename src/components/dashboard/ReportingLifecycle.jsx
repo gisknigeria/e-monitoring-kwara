@@ -202,6 +202,7 @@ export default function ReportingLifecycle({ authToken }) {
     queryKey: ['reporting-snapshots', authToken],
     queryFn: ({ signal }) => apiRequest('/reports/operational/snapshots', authToken, { signal }),
   });
+  const snapshotItems = Array.isArray(snapshots.data) ? snapshots.data : [];
 
   const snapshotDetail = useQuery({
     queryKey: ['reporting-snapshot', authToken, viewingId],
@@ -274,18 +275,18 @@ export default function ReportingLifecycle({ authToken }) {
       {report.data && <ReportMetrics data={report.data} />}
 
       <div className="reporting-snapshots">
-        <h4>Saved snapshots {snapshots.data ? `(${snapshots.data.length})` : ''}</h4>
+        <h4>Saved snapshots {snapshots.data ? `(${snapshotItems.length})` : ''}</h4>
         {snapshots.isPending && <p role="status">Loading snapshots…</p>}
         {snapshots.isError && <p role="alert">{snapshots.error.message} <button onClick={() => snapshots.refetch()}>Retry</button></p>}
-        {snapshots.data && !snapshots.data.length && (
+        {snapshots.isSuccess && !snapshotItems.length && (
           <div className="alv-empty-state">
             <b>No snapshots saved yet.</b>
             <p>Use "Save snapshot" above to freeze a copy of the current report — useful for a check-in you'll want to compare against later (e.g. "6pm election day check").</p>
           </div>
         )}
-        {snapshots.data && snapshots.data.length > 0 && (
+        {snapshotItems.length > 0 && (
           <ul className="geo-view-list reporting-snapshot-list">
-            {snapshots.data.map((snapshot) => (
+            {snapshotItems.map((snapshot) => (
               <li key={snapshot.id}>
                 <b>{snapshot.label || snapshot.phase || 'Snapshot'}</b>
                 <span>{snapshot.phase || 'custom range'}{snapshot.electionId ? ` · ${snapshot.electionId}` : ''}</span>

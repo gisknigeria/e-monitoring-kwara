@@ -172,7 +172,7 @@ export default function DashboardOverlays({ controller }) {
               </pre>
             </div>
           )}
-          {selected.media?.length > 0 && (
+          {Array.isArray(selected.media) && selected.media.length > 0 && (
             <div className="report-media-grid">
               {selected.media.map((item, index) =>
                 item.type === "livestream" ? (
@@ -216,7 +216,7 @@ export default function DashboardOverlays({ controller }) {
                 {canAdmin
                   ? "Administrators can see all incidents"
                   : "Assigned viewers only"}
-                {selected.visibleTo?.length
+                {Array.isArray(selected.visibleTo) && selected.visibleTo.length
                   ? ` - ${selected.visibleTo.map((id) => reportUsers.find((x) => x.id === id)?.name || id).join(", ")}`
                   : ""}
               </dd>

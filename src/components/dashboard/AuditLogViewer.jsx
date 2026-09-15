@@ -106,6 +106,7 @@ function AccessReviewTab({ authToken }) {
   const client = useQueryClient();
   const key = ['access-review', authToken];
   const review = useQuery({ queryKey: key, queryFn: ({ signal }) => apiRequest('/security/access-review', authToken, { signal }) });
+  const reviewItems = Array.isArray(review.data) ? review.data : [];
 
   const recordReview = async (userId) => {
     setBusyId(userId); setError('');
@@ -122,18 +123,18 @@ function AccessReviewTab({ authToken }) {
       <p className="alv-note">Every Admin, Super Admin, and Supervisor account is checked off here periodically, to confirm each person still needs the access level they have. An account is "Overdue" if it's never been checked, or hasn't been checked recently enough.</p>
       {review.isPending && <p role="status">Loading access review status…</p>}
       {review.isError && <p role="alert">{review.error.message} <button onClick={() => review.refetch()}>Retry</button></p>}
-      {review.data && review.data.length === 0 && (
+      {review.isSuccess && !reviewItems.length && (
         <div className="alv-empty-state">
           <b>No admin or supervisor accounts to review yet.</b>
           <p>Once Admin, Super Admin, or Supervisor accounts exist, they'll appear here for periodic review.</p>
         </div>
       )}
-      {review.data && review.data.length > 0 && (
+      {reviewItems.length > 0 && (
         <div className="alv-table-wrap">
           <table className="alv-table">
             <thead><tr><th>Account</th><th>Role</th><th>Last reviewed</th><th>Status</th><th></th></tr></thead>
             <tbody>
-              {review.data.map((account) => (
+              {reviewItems.map((account) => (
                 <Fragment key={account.userId}>
                   <tr>
                     <td>{account.name}</td>
@@ -230,8 +231,8 @@ function SystemHealthTab({ authToken }) {
           </div>
           <p className="alv-note">Generated {new Date(metrics.data.generatedAt).toLocaleString()}</p>
           <details className="area-coverage">
-            <summary>Limitations ({metrics.data.limitations.length})</summary>
-            <ul>{metrics.data.limitations.map((line, index) => <li key={index}>{line}</li>)}</ul>
+            <summary>Limitations ({Array.isArray(metrics.data.limitations) ? metrics.data.limitations.length : 0})</summary>
+            <ul>{(Array.isArray(metrics.data.limitations) ? metrics.data.limitations : []).map((line, index) => <li key={index}>{line}</li>)}</ul>
           </details>
         </>
       )}

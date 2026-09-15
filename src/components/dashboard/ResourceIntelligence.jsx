@@ -105,6 +105,8 @@ export default function ResourceIntelligence({ authToken }) {
   const dashboard = useQuery({ queryKey: key, queryFn: ({ signal }) => apiRequest(`/area-operations/resources/dashboard${scopeQuery(scope)}`, authToken, { signal }) });
   const recordsKey = ['resource-records', authToken, scope.lga, scope.ward];
   const records = useQuery({ queryKey: recordsKey, queryFn: ({ signal }) => apiRequest(`/area-operations/resources/records${scopeQuery(scope)}`, authToken, { signal }) });
+  const resourceRows = Array.isArray(dashboard.data?.resources) ? dashboard.data.resources : [];
+  const deploymentRows = Array.isArray(records.data?.deployment) ? records.data.deployment : [];
 
   const refresh = () => { client.invalidateQueries({ queryKey: key }); client.invalidateQueries({ queryKey: recordsKey }); };
 
@@ -144,8 +146,8 @@ export default function ResourceIntelligence({ authToken }) {
       {dashboard.isError && <p role="alert">{dashboard.error.message} <button onClick={() => dashboard.refetch()}>Retry</button></p>}
       {dashboard.data && (
         <div className="ri-adequacy">
-          {!dashboard.data.resources.length && <p className="area-note">No resource activity recorded for this geography yet.</p>}
-          {dashboard.data.resources.map((row, index) => (
+          {!resourceRows.length && <p className="area-note">No resource activity recorded for this geography yet.</p>}
+          {resourceRows.map((row, index) => (
             <div key={index} className={`ri-adequacy-row ${row.missing > 0 ? 'ri-short' : ''}`}>
               <b>{row.resourceType}</b>
               <span>Required {row.required}</span>
@@ -182,9 +184,9 @@ export default function ResourceIntelligence({ authToken }) {
 
       <h3>Deployments</h3>
       {records.isPending && <p role="status">Loading deployments…</p>}
-      {records.data && !records.data.deployment.length && <p className="area-note">No dispatches recorded for this geography.</p>}
+      {records.data && !deploymentRows.length && <p className="area-note">No dispatches recorded for this geography.</p>}
       <div className="ri-deployment-list">
-        {records.data?.deployment.map((deployment) => (
+        {deploymentRows.map((deployment) => (
           <DeploymentRow key={deployment.id} deployment={deployment} authToken={authToken} onDone={refresh} />
         ))}
       </div>

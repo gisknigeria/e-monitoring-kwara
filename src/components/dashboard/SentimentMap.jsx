@@ -36,10 +36,12 @@ export default function SentimentMap({ authToken, canAdmin }) {
   const boundaries = useQuery(kwaraBoundariesQuery);
   const wardBoundaries = useQuery({ queryKey: ['sentiment-wards', lga?.name], queryFn: ({ signal }) => apiRequest(`/boundaries/kwara/wards?lga=${encodeURIComponent(lga.name)}`, authToken, { signal }), enabled: !!lga, staleTime: 86400000 });
   const agents = useQuery({ queryKey: ['area-agent-counts', authToken], queryFn: ({ signal }) => apiRequest('/area-operations/agents', authToken, { signal }), enabled: canAdmin && showAgents, staleTime: 30000 });
-  const areas = history.data?.areas || [];
-  const assignments = agents.data?.assignments || [];
+  const areas = Array.isArray(history.data?.areas) ? history.data.areas : [];
+  const assignments = Array.isArray(agents.data?.assignments) ? agents.data.assignments : [];
   const currentBoundaryLevel = lga ? 'ward' : 'lga';
-  const rawFeatures = (lga ? wardBoundaries.data?.wards : boundaries.data?.lgas)?.features || [];
+  const rawFeatures = Array.isArray((lga ? wardBoundaries.data?.wards : boundaries.data?.lgas)?.features)
+    ? (lga ? wardBoundaries.data.wards : boundaries.data.lgas).features
+    : [];
   const features = ward ? rawFeatures.filter(f => matchArea([ward], aliasesFor(f, 'ward'))) : rawFeatures;
   const agentsReady = showAgents && canAdmin && agents.isSuccess;
   const countFor = area => agentsInArea(assignments, lga?.name || area.name, lga ? ward?.name || area.name : '', ward ? area.name : '');

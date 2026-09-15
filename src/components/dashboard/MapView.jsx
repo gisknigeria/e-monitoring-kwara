@@ -86,8 +86,9 @@ export default function MapView({
 
   const populationByLga = useMemo(() => {
     const map = new Map();
-    for (const dataset of populationQuery.data || []) {
-      for (const record of dataset.records) {
+    const datasets = Array.isArray(populationQuery.data) ? populationQuery.data : [];
+    for (const dataset of datasets) {
+      for (const record of Array.isArray(dataset?.records) ? dataset.records : []) {
         if (record.geography.lga) map.set(normalizeLgaKey(record.geography.lga), record.value);
       }
     }
@@ -96,8 +97,9 @@ export default function MapView({
 
   const networkByLga = useMemo(() => {
     const map = new Map();
-    for (const dataset of connectivityQuery.data || []) {
-      for (const record of dataset.records) {
+    const datasets = Array.isArray(connectivityQuery.data) ? connectivityQuery.data : [];
+    for (const dataset of datasets) {
+      for (const record of Array.isArray(dataset?.records) ? dataset.records : []) {
         if (record.geography.lga && record.observationType === "measured") {
           map.set(normalizeLgaKey(record.geography.lga), { ...record.coverage, avgLatencyMs: record.signal?.avgLatencyMs ?? null });
         }
@@ -162,7 +164,7 @@ export default function MapView({
           layerItem.data?.features,
       )
       .flatMap((layerItem) =>
-        layerItem.data.features.filter((feature) => {
+        (Array.isArray(layerItem.data?.features) ? layerItem.data.features : []).filter((feature) => {
           if (!feature.geometry?.type?.includes("Polygon")) return false;
           const p = feature.properties || {};
           // Exclude features picked up by dedicated state/LGA overlays
@@ -691,7 +693,7 @@ export default function MapView({
     // Kwara State outline only; LGA polygons are rendered separately.
     const uploadedStateFeatures = mapLayers
       .filter(l => l.visible !== false && l.type === "geojson" && l.data?.features)
-      .flatMap(l => l.data.features.filter(f => {
+      .flatMap(l => (Array.isArray(l.data?.features) ? l.data.features : []).filter(f => {
         const p = f.properties || {};
         const stateName = p.STATE_NAME || p.ADM1_EN || p.admin1Name || p.NAME_1 || p.State || p.state || "";
         const hasLga = p.ADM2_EN || p.lga_name || p.LGA || p.lga || p.LTNAME;
@@ -776,7 +778,7 @@ export default function MapView({
     if (!showLgaBorders) return;
     const uploadedLgaFeatures = mapLayers
       .filter(l => l.visible !== false && l.type === "geojson" && l.data?.features)
-      .flatMap(l => l.data.features.filter(f => {
+      .flatMap(l => (Array.isArray(l.data?.features) ? l.data.features : []).filter(f => {
         const p = f.properties || {};
         const hasLga = p.ADM2_EN || p.lga_name || p.LGA || p.lga || p.LTNAME;
         const stateName = p.STATE_NAME || p.ADM1_EN || p.admin1Name || p.NAME_1 || p.State || p.state || "";

@@ -15,6 +15,7 @@ export default function AreaOperations({ authToken }) {
   const client = useQueryClient();
   const key = ['area-operation-plans', authToken];
   const plans = useQuery({ queryKey: key, queryFn: ({ signal }) => apiRequest('/area-operations/plans', authToken, { signal }) });
+  const planItems = Array.isArray(plans.data) ? plans.data : [];
   const options = getRegistrationLocationOptions('Kwara', form.lga);
   const change = event => setForm(previous => ({ ...previous, [event.target.name]: event.target.value, ...(event.target.name === 'lga' ? { ward: '' } : {}) }));
   const save = async event => {
@@ -56,8 +57,8 @@ export default function AreaOperations({ authToken }) {
     <h3>Saved operations</h3>
     {plans.isPending && <p role="status">Loading operations…</p>}
     {plans.isError && <p role="alert">{plans.error.message} <button onClick={() => plans.refetch()}>Retry</button></p>}
-    <div className="area-plan-list">{(plans.data || []).map(plan => <article key={plan.id}><div><span className="eyebrow">{plan.category} · {plan.date}</span><h4>{plan.title}</h4><p>{plan.lga} · {plan.ward || 'All wards'}</p><p className="area-plan-notes">{plan.notes}</p></div><button disabled={busy} onClick={() => remove(plan.id)} aria-label={`Remove ${plan.title}`}>Remove</button></article>)}</div>
-    {plans.isSuccess && !plans.data.length && <p>No operations planned yet.</p>}
+    <div className="area-plan-list">{planItems.map(plan => <article key={plan.id}><div><span className="eyebrow">{plan.category} · {plan.date}</span><h4>{plan.title}</h4><p>{plan.lga} · {plan.ward || 'All wards'}</p><p className="area-plan-notes">{plan.notes}</p></div><button disabled={busy} onClick={() => remove(plan.id)} aria-label={`Remove ${plan.title}`}>Remove</button></article>)}</div>
+    {plans.isSuccess && !planItems.length && <p>No operations planned yet.</p>}
     </>}
   </section>;
 }
