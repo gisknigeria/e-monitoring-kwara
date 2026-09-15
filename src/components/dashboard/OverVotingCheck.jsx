@@ -8,6 +8,25 @@ const STATUS_LABEL = {
   unknown: 'No data at this scope',
 };
 
+const finiteNumber = (value, fallback = 0) => {
+  const number = Number(value);
+  return Number.isFinite(number) ? number : fallback;
+};
+
+export function normalizeOverVotingResponse(payload) {
+  const value = payload?.data && typeof payload.data === 'object' && !Array.isArray(payload.data)
+    ? payload.data
+    : payload;
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
+  return {
+    ...value,
+    submittedVotes: finiteNumber(value.submittedVotes),
+    pollingUnitsReporting: finiteNumber(value.pollingUnitsReporting),
+    registeredVoters: value.registeredVoters == null ? null : finiteNumber(value.registeredVoters),
+    excessVotes: finiteNumber(value.excessVotes),
+  };
+}
+
 export default function OverVotingCheck({ authToken, geography = { state: 'Kwara' } }) {
   const safeGeography = geography || { state: 'Kwara' };
   const params = new URLSearchParams(Object.entries(safeGeography).filter(([, value]) => value));
@@ -15,6 +34,7 @@ export default function OverVotingCheck({ authToken, geography = { state: 'Kwara
     queryKey: ['over-voting', authToken, params.toString()],
     queryFn: ({ signal }) => apiRequest(`/reports/over-voting?${params.toString()}`, authToken, { signal }),
   });
+  const checkData = normalizeOverVotingResponse(check.data);
 
   const scopeLabel = [safeGeography.state, safeGeography.lga, safeGeography.ward, safeGeography.pollingUnit].filter(Boolean).join(' · ') || 'Kwara State';
 
@@ -25,27 +45,29 @@ export default function OverVotingCheck({ authToken, geography = { state: 'Kwara
           <h3>Over-Voting Check</h3>
           <p>Submitted votes vs. registered voters — {scopeLabel}</p>
         </div>
-        {check.data && <span className={`overvoting-badge overvoting-${check.data.status}`}>{STATUS_LABEL[check.data.status]}</span>}
+        {checkData && <span className={`overvoting-badge overvoting-${checkData.status}`}>{STATUS_LABEL[checkData.status] || 'Check available'}</span>}
       </header>
 
       {check.isPending && <p role="status">Checking…</p>}
       {check.isError && <p role="alert">{check.error.message} <button onClick={() => check.refetch()}>Retry</button></p>}
 
-      {check.data && (
+      {checkData && (
         <>
           <div className="overvoting-figures">
-            <div><span>Submitted votes</span><b>{check.data.submittedVotes.toLocaleString()}</b></div>
-            <div><span>Registered voters</span><b>{check.data.registeredVoters !== null ? check.data.registeredVoters.toLocaleString() : '—'}</b></div>
-            <div><span>Polling units reporting</span><b>{check.data.pollingUnitsReporting.toLocaleString()}</b></div>
-            {check.data.status === 'exceeds-registered-voters' && (
-              <div className="overvoting-excess"><span>Excess votes</span><b>{check.data.excessVotes.toLocaleString()}</b></div>
+            <div><span>Submitted votes</span><b>{checkData.submittedVotes.toLocaleString()}</b></div>
+            <div><span>Registered voters</span><b>{checkData.registeredVoters !== null ? checkData.registeredVoters.toLocaleString() : '—'}</b></div>
+            <div><span>Polling units reporting</span><b>{checkData.pollingUnitsReporting.toLocaleString()}</b></div>
+            {checkData.status === 'exceeds-registered-voters' && (
+              <div className="overvoting-excess"><span>Excess votes</span><b>{checkData.excessVotes.toLocaleString()}</b></div>
             )}
           </div>
-          {check.data.status === 'unknown' ? (
-            <p className="post-card-note">{check.data.note}</p>
+          {checkData.status === 'unknown' ? (
+            <p className="post-card-note">{checkData.note || 'Registered-voter data is unavailable for this scope.'}</p>
           ) : (
             <p className="post-card-note">
-              {check.data.registeredVotersSource.sourceName} ({check.data.registeredVotersSource.sourceVersion}) · {check.data.methodology}
+              {checkData.registeredVotersSource?.sourceName || 'Registered-voter dataset'}
+              {checkData.registeredVotersSource?.sourceVersion ? ` (${checkData.registeredVotersSource.sourceVersion})` : ''}
+              {checkData.methodology ? ` · ${checkData.methodology}` : ''}
             </p>
           )}
         </>
