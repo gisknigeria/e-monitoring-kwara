@@ -375,7 +375,7 @@ export default function DashboardMapWorkspace({ controller }) {
               <input
                 value={coords}
                 onChange={(e) => setCoords(e.target.value)}
-                placeholder="7.3775, 3.9470"
+                placeholder="8.4966, 4.5426"
               />
               <button>GO</button>
             </form>}
