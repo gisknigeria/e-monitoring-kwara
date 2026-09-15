@@ -28,7 +28,9 @@ export function normalizeOverVotingResponse(payload) {
 }
 
 export default function OverVotingCheck({ authToken, geography = { state: 'Kwara' } }) {
-  const safeGeography = geography || { state: 'Kwara' };
+  const safeGeography = geography && typeof geography === 'object' && !Array.isArray(geography)
+    ? geography
+    : { state: 'Kwara' };
   const params = new URLSearchParams(Object.entries(safeGeography).filter(([, value]) => value));
   const check = useQuery({
     queryKey: ['over-voting', authToken, params.toString()],

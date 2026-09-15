@@ -204,7 +204,7 @@ function SystemHealthTab({ authToken }) {
         <div className={`sh-ready-banner ${ready.data.ready ? 'sh-ready-ok' : 'sh-ready-down'}`}>
           <b>{ready.data.ready ? 'Ready to serve traffic' : 'Not ready'}</b>
           <div className="sh-chip-row">
-            {Object.entries(ready.data.checks).filter(([key]) => key !== 'databaseError').map(([key, value]) => {
+            {Object.entries(ready.data.checks && typeof ready.data.checks === 'object' ? ready.data.checks : {}).filter(([key]) => key !== 'databaseError').map(([key, value]) => {
               // Render defensively: a non-scalar check value used to crash this whole screen.
               const text = value && typeof value === 'object' ? JSON.stringify(value) : String(value);
               return (
@@ -214,7 +214,7 @@ function SystemHealthTab({ authToken }) {
               );
             })}
           </div>
-          {ready.data.checks.databaseError && <p role="alert" className="sh-error-detail">Database error: {ready.data.checks.databaseError}</p>}
+          {ready.data.checks?.databaseError && <p role="alert" className="sh-error-detail">Database error: {ready.data.checks.databaseError}</p>}
         </div>
       )}
 

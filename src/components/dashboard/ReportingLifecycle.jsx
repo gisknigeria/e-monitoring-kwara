@@ -93,6 +93,7 @@ function RollupTable({ title, groups }) {
 
 function ReportMetrics({ data }) {
   const { metrics, scope, window, rollups, sources, metadata } = data;
+  const sourceEntries = sources && typeof sources === 'object' ? Object.entries(sources) : [];
   const scopeLabel = [scope.state, scope.lga, scope.ward, scope.pollingUnit].filter(Boolean).join(' · ') || 'Kwara State (all)';
   const windowLabel = window.since || window.until
     ? `${window.since ? new Date(window.since).toLocaleString() : 'start of records'} → ${window.until ? new Date(window.until).toLocaleString() : 'now'}${window.phase ? ` (${window.phase})` : ''}`
@@ -159,7 +160,7 @@ function ReportMetrics({ data }) {
       </div>
 
       <p className="area-note reporting-sources-note">
-        Sources: {Object.entries(sources).map(([key, count]) => `${key} ${count}`).join(' · ')}
+        Sources: {sourceEntries.map(([key, count]) => `${key} ${count}`).join(' · ')}
       </p>
 
       <details className="area-coverage geo-view-limitations">
