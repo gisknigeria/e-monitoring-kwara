@@ -2,7 +2,7 @@ services:
   - type: web
     name: election-monitor-command-center
     runtime: docker
-    plan: starter
+    plan: free
     region: frankfurt
     dockerfilePath: ./Dockerfile
     healthCheckPath: /api/health
@@ -10,13 +10,11 @@ services:
       - key: NODE_ENV
         value: production
       - key: DATA_FILE
-        value: /data/data.json
+        value: /tmp/data.json
+      - key: EVIDENCE_STORAGE_DIR
+        value: /tmp/evidence
       - key: JWT_SECRET
         generateValue: true
-      # Must match the public Render URL so browser requests are not accepted
-      # from arbitrary origins. Override this value if the service name changes.
-      - key: CORS_ORIGIN
-        value: https://e-monitoring.onrender.com
       - key: IREV_AUTO_SYNC
         value: "false"
       - key: DATABASE_URL
@@ -41,7 +39,3 @@ services:
         sync: false
       - key: EXPRESSTURN_PASSWORD
         sync: false
-    disk:
-      name: election-monitor-data
-      mountPath: /data
-      sizeGB: 1
