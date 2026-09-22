@@ -10,6 +10,8 @@ RUN npm run build
 
 ENV NODE_ENV=production
 ENV PORT=5000
+ENV DATA_FILE=/tmp/data.json
+ENV EVIDENCE_STORAGE_DIR=/tmp/evidence
 EXPOSE 5000
 USER app
 
