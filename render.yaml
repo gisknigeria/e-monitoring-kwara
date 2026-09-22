@@ -22,11 +22,11 @@ services:
       - key: ADMIN_EMAIL
         value: admin@command.local
       - key: ADMIN_PASSWORD
-        sync: false
+        generateValue: true
       - key: SUPER_ADMIN_EMAIL
         value: superadmin@command.local
       - key: SUPER_ADMIN_PASSWORD
-        sync: false
+        generateValue: true
       - key: CLOUDFLARE_TURN_KEY_ID
         sync: false
       - key: CLOUDFLARE_TURN_API_TOKEN
