@@ -514,8 +514,34 @@ export async function initPostgres({ pool, seed }) {
     "delete from incidents where id in ('i1','i2','i3') or created_by='seed'",
   );
   for (const user of seed.users) {
+    const existingByEmail = await pool.query(
+      "select id from users where email=$1 limit 1",
+      [user.email],
+    );
+    if (existingByEmail.rows[0]) {
+      await pool.query(
+        "update users set name=$1,password=$2,role=$3,rank=$4,active=$5,unit=$6,unit_type=$7,command=$8,division=$9,station=$10,lga=$11,lat=$12,lng=$13 where id=$14",
+        [
+          user.name,
+          user.password,
+          user.role,
+          user.rank,
+          user.active,
+          user.unit,
+          user.unitType || "Division",
+          user.command,
+          user.division,
+          user.station || "",
+          user.lga,
+          user.lat,
+          user.lng,
+          existingByEmail.rows[0].id,
+        ],
+      );
+      continue;
+    }
     await pool.query(
-      "insert into users (id,name,email,password,role,rank,active,unit,unit_type,command,division,station,lga,lat,lng) values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15) on conflict (id) do update set name=excluded.name,email=excluded.email,role=excluded.role,rank=excluded.rank,active=excluded.active,unit=excluded.unit,command=excluded.command",
+      "insert into users (id,name,email,password,role,rank,active,unit,unit_type,command,division,station,lga,lat,lng) values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15) on conflict (email) do update set name=excluded.name,password=excluded.password,role=excluded.role,rank=excluded.rank,active=excluded.active,unit=excluded.unit,unit_type=excluded.unit_type,command=excluded.command,division=excluded.division,station=excluded.station,lga=excluded.lga,lat=excluded.lat,lng=excluded.lng",
       [
         user.id,
         user.name,
